@@ -218,6 +218,19 @@ paths:
                 type: "array"
                 items:
                   $ref: "#/components/schemas/EventRankingEntry"
+              example:
+                - posicion: 1
+                  eventoId: "550e8400-e29b-41d4-a716-446655440000"
+                  tituloEvento: "Danza de los Saraguros"
+                  categoria: "danza"
+                  promedioCalificacion: 4.85
+                  totalVotos: 420
+                - posicion: 2
+                  eventoId: "660e9500-e29b-41d4-a716-556655440001"
+                  tituloEvento: "Máscaras y Ritos"
+                  categoria: "teatro"
+                  promedioCalificacion: 4.70
+                  totalVotos: 310
 
   /api/v1/rankings/users:
     get:
@@ -241,6 +254,21 @@ paths:
                 type: "array"
                 items:
                   $ref: "#/components/schemas/UserRankingEntry"
+              example:
+                - posicion: 1
+                  userId: "770e9500-e29b-41d4-a716-666655440002"
+                  nombreUsuario: "Lucia_Loja"
+                  puntosAcumulados: 450
+                  totalSellos: 7
+                  totalVotos: 12
+                  badgesCount: 3
+                - posicion: 2
+                  userId: "880e9500-e29b-41d4-a716-776655440003"
+                  nombreUsuario: "CarlosAndes"
+                  puntosAcumulados: 320
+                  totalSellos: 5
+                  totalVotos: 8
+                  badgesCount: 2
 
   /api/v1/badges:
     get:
@@ -256,6 +284,19 @@ paths:
                 type: "array"
                 items:
                   $ref: "#/components/schemas/Badge"
+              example:
+                - id: "badge-001"
+                  nombre: "Explorador Andino"
+                  descripcion: "Visitaste 5 o más escenarios del festival"
+                  iconoUrl: "https://assets.pulsaloja.ec/badges/explorador.svg"
+                  criterio: "Obtener 5 sellos en el pasaporte"
+                  puntosRequeridos: 250
+                - id: "badge-002"
+                  nombre: "Crítico de Calle"
+                  descripcion: "Emitiste 3 o más votos en flash-performances"
+                  iconoUrl: "https://assets.pulsaloja.ec/badges/critico.svg"
+                  criterio: "Votar en 3 actos callejeros"
+                  puntosRequeridos: 100
 
   /api/v1/badges/{userId}:
     get:
@@ -273,6 +314,14 @@ paths:
                 type: "array"
                 items:
                   $ref: "#/components/schemas/UserBadge"
+              example:
+                - id: "badge-001"
+                  nombre: "Explorador Andino"
+                  descripcion: "Visitaste 5 o más escenarios del festival"
+                  iconoUrl: "https://assets.pulsaloja.ec/badges/explorador.svg"
+                  criterio: "Obtener 5 sellos en el pasaporte"
+                  puntosRequeridos: 250
+                  desbloqueadoEn: "2026-10-16T21:10:00Z"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -471,7 +520,7 @@ components:
         - $ref: "#/components/schemas/Badge"
         - type: "object"
           properties:
-            desbloquedoEn:
+            desbloqueadoEn:
               type: "string"
               format: "date-time"
 
