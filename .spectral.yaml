@@ -1,0 +1,36 @@
+extends: ["spectral:oas"]
+
+rules:
+  # Requerir descripción en todos los endpoints
+  operation-description:
+    description: "Todos los endpoints deben tener una descripción"
+    given: "$.paths[*][get,post,put,patch,delete]"
+    severity: warn
+    then:
+      field: description
+      function: truthy
+
+  # Requerir ejemplos en respuestas 200
+  response-examples:
+    description: "Las respuestas exitosas deben tener ejemplos"
+    given: "$.paths[*][*].responses[200,201].content[*]"
+    severity: warn
+    then:
+      field: example
+      function: truthy
+
+  # Requerir operationId en todos los endpoints
+  operation-operationId:
+    given: "$.paths[*][get,post,put,patch,delete]"
+    severity: error
+    then:
+      field: operationId
+      function: truthy
+
+  # Requerir tags en todos los endpoints
+  operation-tags:
+    given: "$.paths[*][get,post,put,patch,delete]"
+    severity: warn
+    then:
+      field: tags
+      function: truthy

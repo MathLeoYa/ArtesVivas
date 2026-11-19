@@ -1,0 +1,238 @@
+version: "3.9"
+
+# ═══════════════════════════════════════════════════════
+# Pulso Loja — Docker Compose (Desarrollo & Producción)
+# Festival Internacional de Artes Vivas de Loja (FIAVL)
+# ═══════════════════════════════════════════════════════
+
+services:
+
+  # ─────────────────────────────────────────────
+  # INFRAESTRUCTURA
+  # ─────────────────────────────────────────────
+
+  traefik:
+    image: traefik:v3.0
+    container_name: pulso-traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Traefik dashboard (solo desarrollo)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - festival-net
+    restart: unless-stopped
+
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: pulso-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pulsaloja}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-festivalArtes2026!}
+      POSTGRES_DB: ${POSTGRES_DB:-pulsaloja_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - festival-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pulsaloja} -d ${POSTGRES_DB:-pulsaloja_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: pulso-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - festival-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # MOCK SERVERS (SDD — Solo en desarrollo)
+  # Generados desde los specs OpenAPI via Prism
+  # ─────────────────────────────────────────────
+
+  mock-catalog:
+    image: stoplight/prism:5
+    container_name: pulso-mock-catalog
+    command: mock -h 0.0.0.0 /specs/openapi/catalog-service.yaml
+    volumes:
+      - ./specs:/specs:ro
+    ports:
+      - "4001:4010"
+    networks:
+      - festival-net
+    profiles: ["mock", "dev"]
+
+  mock-gamification:
+    image: stoplight/prism:5
+    container_name: pulso-mock-gamification
+    command: mock -h 0.0.0.0 /specs/openapi/gamification-service.yaml
+    volumes:
+      - ./specs:/specs:ro
+    ports:
+      - "4002:4010"
+    networks:
+      - festival-net
+    profiles: ["mock", "dev"]
+
+  # ─────────────────────────────────────────────
+  # MICROSERVICIOS
+  # ─────────────────────────────────────────────
+
+  catalog-service:
+    build:
+      context: ./services/catalog-service
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-development}
+    container_name: pulso-catalog
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pulsaloja}:${POSTGRES_PASSWORD:-festivalArtes2026!}@postgres:5432/${POSTGRES_DB:-pulsaloja_db}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-production}
+      FESTIVAL_PERIMETER_KM: ${FESTIVAL_PERIMETER_KM:-2.5}
+      FESTIVAL_CENTER_LAT: ${FESTIVAL_CENTER_LAT:--3.9985}
+      FESTIVAL_CENTER_LNG: ${FESTIVAL_CENTER_LNG:--79.1972}
+    volumes:
+      - ./services/catalog-service:/app:delegated
+      - /app/node_modules
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - festival-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.catalog.rule=PathPrefix(`/catalog`)"
+      - "traefik.http.services.catalog.loadbalancer.server.port=3001"
+    restart: unless-stopped
+
+  telemetry-service:
+    build:
+      context: ./services/telemetry-service
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-development}
+    container_name: pulso-telemetry
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3003
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pulsaloja}:${POSTGRES_PASSWORD:-festivalArtes2026!}@postgres:5432/${POSTGRES_DB:-pulsaloja_db}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-production}
+      WS_PORT: 3003
+      WEATHER_API_KEY: ${WEATHER_API_KEY:-}
+      FLASH_NOTIFICATION_RADIUS_M: ${FLASH_NOTIFICATION_RADIUS_M:-500}
+    volumes:
+      - ./services/telemetry-service:/app:delegated
+      - /app/node_modules
+    ports:
+      - "3003:3003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - festival-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.telemetry.rule=PathPrefix(`/live`)"
+      - "traefik.http.services.telemetry.loadbalancer.server.port=3003"
+    restart: unless-stopped
+
+  gamification-service:
+    build:
+      context: ./services/gamification-service
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-development}
+    container_name: pulso-gamification
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3002
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pulsaloja}:${POSTGRES_PASSWORD:-festivalArtes2026!}@postgres:5432/${POSTGRES_DB:-pulsaloja_db}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-production}
+      VOTE_RADIUS_M: ${VOTE_RADIUS_M:-200}
+      STAMP_RADIUS_M: ${STAMP_RADIUS_M:-100}
+    volumes:
+      - ./services/gamification-service:/app:delegated
+      - /app/node_modules
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - festival-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.gamification.rule=PathPrefix(`/gamification`)"
+      - "traefik.http.services.gamification.loadbalancer.server.port=3002"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-development}
+    container_name: pulso-frontend
+    environment:
+      VITE_API_CATALOG_URL: ${VITE_API_CATALOG_URL:-http://localhost/catalog}
+      VITE_API_GAMIFICATION_URL: ${VITE_API_GAMIFICATION_URL:-http://localhost/gamification}
+      VITE_WS_URL: ${VITE_WS_URL:-ws://localhost/live}
+    volumes:
+      - ./frontend:/app:delegated
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    networks:
+      - festival-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.services.frontend.loadbalancer.server.port=5173"
+    profiles: ["full"]
+
+# ─────────────────────────────────────────────
+# REDES Y VOLÚMENES
+# ─────────────────────────────────────────────
+
+networks:
+  festival-net:
+    driver: bridge
+    name: pulso-loja-network
+
+volumes:
+  postgres_data:
+    name: pulso-postgres-data
+  redis_data:
+    name: pulso-redis-data

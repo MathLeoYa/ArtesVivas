@@ -1,0 +1,504 @@
+asyncapi: "3.0.0"
+info:
+  title: "Pulso Loja — Live Events Stream"
+  description: |
+    # Live Telemetry & Notification Service — AsyncAPI
+    Define todos los canales de comunicación en tiempo real del festival.
+
+    ## Protocolo
+    - **WebSocket** (wss://) como protocolo principal
+    - **Server-Sent Events** (SSE) como fallback para navegadores con restricciones
+    
+    ## Arquitectura del Flujo de Datos
+    ```
+    Servicios (Catalog / Gamification)
+         │
+         │ Publican eventos de dominio a Redis Pub/Sub
+         ▼
+    Telemetry Service (subscrito a Redis Pub/Sub)
+         │
+         │ Reenvía a clientes conectados via WebSocket
+         ▼
+    PWA / Mobile (clientes conectados)
+    ```
+
+    ## Canales Bidireccionales
+    - **Server → Client**: actualizaciones del festival (eventos, aforo, clima, votos, flashmobs)
+    - **Client → Server**: ubicación del usuario (para geocercas y notificaciones localizadas)
+
+    ## Autenticación WebSocket
+    El cliente debe enviar el JWT como query param en la conexión inicial:
+    `wss://api.pulsaloja.ec/live?token=<JWT>`
+
+    ## Metodología SDD
+    **Este archivo es el contrato inmutable** del sistema de comunicación en tiempo real.
+    Define qué datos fluyen, en qué formato, y en qué momento. Cambios requieren PR aprobado.
+
+  version: "1.0.0"
+  contact:
+    name: "Integrante 3 — Equipo Pulso Loja"
+
+servers:
+  local:
+    host: "localhost:3003"
+    protocol: "ws"
+    description: "Servidor WebSocket local (desarrollo)"
+    security:
+      - $ref: "#/components/securitySchemes/JWTQueryParam"
+  production:
+    host: "api.pulsaloja.ec"
+    protocol: "wss"
+    pathname: "/live"
+    description: "Servidor WebSocket producción (TLS via Traefik)"
+    security:
+      - $ref: "#/components/securitySchemes/JWTQueryParam"
+
+channels:
+  festivalEventsUpdates:
+    address: "festival/events/updates"
+    description: |
+      Canal principal de actualizaciones del catálogo de eventos.
+      El servidor notifica a TODOS los clientes conectados cuando:
+      - Se crea un nuevo evento
+      - Un evento cambia de estado (cancelado, en_vivo, reubicando)
+      - Un evento cambia de escenario
+    messages:
+      eventUpdateMessage:
+        $ref: "#/components/messages/EventUpdateMessage"
+
+  venueCapacity:
+    address: "festival/venues/{venueId}/capacity"
+    description: |
+      Canal de semáforo de aforo para un escenario específico.
+      Los clientes se suscriben al escenario que les interesa.
+      Se emite cuando el nivel de aforo cambia de categoría (verde→amarillo, amarillo→rojo, etc.)
+    parameters:
+      venueId:
+        $ref: "#/components/parameters/VenueId"
+    messages:
+      capacityUpdate:
+        $ref: "#/components/messages/CapacityUpdateMessage"
+
+  liveVoteCount:
+    address: "festival/votes/live/{eventId}"
+    description: |
+      Aplausómetro en tiempo real para un evento específico.
+      Se emite cada vez que se registra un voto nuevo vía gamification-service.
+      Los clientes se suscriben al evento que están presenciando.
+    parameters:
+      eventId:
+        $ref: "#/components/parameters/EventId"
+    messages:
+      liveVoteCountMessage:
+        $ref: "#/components/messages/LiveVoteCountMessage"
+
+  weatherAlerts:
+    address: "festival/alerts/weather"
+    description: |
+      Canal de alertas meteorológicas del festival.
+      Se activa cuando el sistema detecta condiciones adversas (lluvia, granizo).
+      Incluye sugerencias de escenarios cubiertos alternativos con aforo disponible.
+    messages:
+      weatherAlertMessage:
+        $ref: "#/components/messages/WeatherAlertMessage"
+
+  flashPerformanceNearby:
+    address: "festival/flash/nearby"
+    description: |
+      Alertas de flash-performances cercanas al usuario.
+      Solo los clientes dentro del radio de notificación del acto reciben el mensaje.
+      La selección de destinatarios se hace con GEOSEARCH en Redis.
+    messages:
+      flashPerformanceAlertMessage:
+        $ref: "#/components/messages/FlashPerformanceAlertMessage"
+
+  userLocationUpdate:
+    address: "client/location/update"
+    description: |
+      Canal de actualización de ubicación del cliente.
+      El cliente envía su posición GPS periódicamente (máx cada 10 segundos).
+      El servidor usa esta ubicación para:
+      1. Detectar si el usuario entra en una geocerca de evento (flash nearby)
+      2. Incluirlo en notificaciones de aforo y clima relevantes para su zona
+      Nota: La ubicación NO se persiste en base de datos, solo se mantiene en Redis con TTL corto.
+    messages:
+      userLocationPingMessage:
+        $ref: "#/components/messages/UserLocationPingMessage"
+
+operations:
+  sendEventUpdates:
+    action: "send"
+    channel:
+      $ref: "#/channels/festivalEventsUpdates"
+    description: "El servidor envía actualizaciones del estado de eventos a todos los clientes"
+    messages:
+      - $ref: "#/channels/festivalEventsUpdates/messages/eventUpdateMessage"
+
+  sendCapacityUpdate:
+    action: "send"
+    channel:
+      $ref: "#/channels/venueCapacity"
+    description: "El servidor envía actualizaciones del semáforo de aforo a suscriptores del escenario"
+    messages:
+      - $ref: "#/channels/venueCapacity/messages/capacityUpdate"
+
+  sendLiveVoteCount:
+    action: "send"
+    channel:
+      $ref: "#/channels/liveVoteCount"
+    description: "El servidor envía el conteo actualizado de votos/aplausos"
+    messages:
+      - $ref: "#/channels/liveVoteCount/messages/liveVoteCountMessage"
+
+  sendWeatherAlert:
+    action: "send"
+    channel:
+      $ref: "#/channels/weatherAlerts"
+    description: "El servidor emite alertas de clima a todos los clientes conectados"
+    messages:
+      - $ref: "#/channels/weatherAlerts/messages/weatherAlertMessage"
+
+  sendFlashPerformanceAlert:
+    action: "send"
+    channel:
+      $ref: "#/channels/flashPerformanceNearby"
+    description: "El servidor notifica flash-performances a clientes dentro del radio"
+    messages:
+      - $ref: "#/channels/flashPerformanceNearby/messages/flashPerformanceAlertMessage"
+
+  receiveUserLocation:
+    action: "receive"
+    channel:
+      $ref: "#/channels/userLocationUpdate"
+    description: "El servidor recibe la ubicación del cliente para geocercas"
+    messages:
+      - $ref: "#/channels/userLocationUpdate/messages/userLocationPingMessage"
+
+components:
+  securitySchemes:
+    JWTQueryParam:
+      type: "httpApiKey"
+      in: "query"
+      name: "token"
+      description: "JWT de autenticación enviado como query parameter en la conexión WebSocket"
+
+  parameters:
+    VenueId:
+      description: "UUID del escenario"
+      schema:
+        type: "string"
+        format: "uuid"
+    EventId:
+      description: "UUID del evento"
+      schema:
+        type: "string"
+        format: "uuid"
+
+  messages:
+    EventUpdateMessage:
+      name: "EventUpdate"
+      title: "Actualización de Evento Cultural"
+      summary: "Notificación de creación o cambio de estado de un evento"
+      contentType: "application/json"
+      payload:
+        $ref: "#/components/schemas/EventUpdatePayload"
+      examples:
+        - name: "eventoReubicado"
+          summary: "Evento reubicado por lluvia"
+          payload:
+            tipo: "EventRelocated"
+            eventoId: "550e8400-e29b-41d4-a716-446655440000"
+            titulo: "Danza de los Saraguros"
+            estadoAnterior: "en_vivo"
+            estadoNuevo: "reubicando"
+            escenarioAnterior:
+              id: "venue-001"
+              nombre: "Plaza San Sebastián"
+              esCubierto: false
+            escenarioNuevo:
+              id: "venue-002"
+              nombre: "Teatro Benjamín Carrión"
+              esCubierto: true
+            timestamp: "2026-10-15T19:34:21Z"
+
+    CapacityUpdateMessage:
+      name: "CapacityUpdate"
+      title: "Actualización de Aforo (Semáforo)"
+      summary: "Cambio en el nivel de aforo de un escenario"
+      contentType: "application/json"
+      payload:
+        $ref: "#/components/schemas/CapacityUpdatePayload"
+      examples:
+        - name: "aforoAmarillo"
+          summary: "Escenario llega al 70% de capacidad"
+          payload:
+            escenarioId: "venue-001"
+            escenarioNombre: "Plaza San Sebastián"
+            ocupacionActual: 352
+            capacidadMaxima: 500
+            porcentajeOcupacion: 70.4
+            nivelAnterior: "verde"
+            nivelActual: "amarillo"
+            timestamp: "2026-10-15T19:40:00Z"
+
+    LiveVoteCountMessage:
+      name: "LiveVoteCount"
+      title: "Actualización del Aplausómetro"
+      summary: "Nuevo conteo de votos en vivo para un evento"
+      contentType: "application/json"
+      payload:
+        $ref: "#/components/schemas/LiveVoteCountPayload"
+      examples:
+        - name: "nuevovoto"
+          summary: "Alguien vota — se actualiza el conteo"
+          payload:
+            eventoId: "550e8400-e29b-41d4-a716-446655440000"
+            totalVotos: 343
+            promedio: 4.72
+            distribucion:
+              "5": 190
+              "4": 98
+              "3": 41
+              "2": 10
+              "1": 4
+            timestamp: "2026-10-15T19:34:45Z"
+
+    WeatherAlertMessage:
+      name: "WeatherAlert"
+      title: "Alerta Meteorológica del Festival"
+      summary: "Aviso de condición climática adversa con recomendaciones"
+      contentType: "application/json"
+      payload:
+        $ref: "#/components/schemas/WeatherAlertPayload"
+      examples:
+        - name: "alertaLluvia"
+          summary: "Lluvia detectada — reubicación de eventos callejeros"
+          payload:
+            tipo: "lluvia"
+            severidad: "moderada"
+            mensaje: "⛈️ Se aproxima lluvia al centro de Loja. Los actos al aire libre se reubican."
+            eventosAfectados:
+              - eventoId: "event-001"
+                tituloEvento: "Máscaras Rituales"
+                escenarioActual: "Plaza de la Independencia"
+                escenarioAlternativoCubierto:
+                  id: "venue-003"
+                  nombre: "Casa de la Cultura Núcleo de Loja"
+                  aforoDisponible: 180
+            timestamp: "2026-10-15T20:00:00Z"
+            vigenciaHastaEstimada: "2026-10-15T22:00:00Z"
+
+    FlashPerformanceAlertMessage:
+      name: "FlashPerformanceAlert"
+      title: "Flash Performance Cercana"
+      summary: "Aviso de acto espontáneo callejero cerca del usuario"
+      contentType: "application/json"
+      payload:
+        $ref: "#/components/schemas/FlashPerformanceAlertPayload"
+      examples:
+        - name: "flashNearby"
+          summary: "Flash-performance a 200m del usuario"
+          payload:
+            eventoId: "flash-001"
+            nombreActo: "Máscaras Rituales — Improvisación"
+            artista: "Colectivo Máscaras"
+            coordenadas:
+              lat: -3.9980
+              lng: -79.1965
+            distanciaMetros: 200
+            duracionEstimadaMinutos: 20
+            timestamp: "2026-10-15T18:15:00Z"
+
+    UserLocationPingMessage:
+      name: "UserLocationPing"
+      title: "Ping de Ubicación del Usuario"
+      summary: "El cliente informa su posición GPS actual al servidor"
+      contentType: "application/json"
+      payload:
+        $ref: "#/components/schemas/UserLocationPingPayload"
+
+  schemas:
+    GeoPoint:
+      type: "object"
+      required: ["lat", "lng"]
+      properties:
+        lat:
+          type: "number"
+          format: "double"
+          example: -3.9985
+        lng:
+          type: "number"
+          format: "double"
+          example: -79.1972
+
+    CapacityLevel:
+      type: "string"
+      enum: ["verde", "amarillo", "rojo", "cerrado"]
+
+    EventUpdatePayload:
+      type: "object"
+      required: ["tipo", "eventoId", "titulo", "estadoNuevo", "timestamp"]
+      properties:
+        tipo:
+          type: "string"
+          enum:
+            - "EventCreated"
+            - "EventUpdated"
+            - "EventCancelled"
+            - "EventStarted"
+            - "EventFinished"
+            - "EventRelocated"
+            - "FlashPerformanceStarted"
+        eventoId:
+          type: "string"
+          format: "uuid"
+        titulo:
+          type: "string"
+        estadoAnterior:
+          type: "string"
+          nullable: true
+        estadoNuevo:
+          type: "string"
+        escenarioAnterior:
+          type: "object"
+          nullable: true
+          properties:
+            id: { type: "string", format: "uuid" }
+            nombre: { type: "string" }
+            esCubierto: { type: "boolean" }
+        escenarioNuevo:
+          type: "object"
+          nullable: true
+          properties:
+            id: { type: "string", format: "uuid" }
+            nombre: { type: "string" }
+            esCubierto: { type: "boolean" }
+        timestamp:
+          type: "string"
+          format: "date-time"
+
+    CapacityUpdatePayload:
+      type: "object"
+      required: ["escenarioId", "escenarioNombre", "ocupacionActual", "capacidadMaxima", "nivelActual", "timestamp"]
+      properties:
+        escenarioId:
+          type: "string"
+          format: "uuid"
+        escenarioNombre:
+          type: "string"
+        ocupacionActual:
+          type: "integer"
+          minimum: 0
+        capacidadMaxima:
+          type: "integer"
+          minimum: 1
+        porcentajeOcupacion:
+          type: "number"
+          format: "double"
+          minimum: 0
+          maximum: 100
+        nivelAnterior:
+          $ref: "#/components/schemas/CapacityLevel"
+        nivelActual:
+          $ref: "#/components/schemas/CapacityLevel"
+        timestamp:
+          type: "string"
+          format: "date-time"
+
+    LiveVoteCountPayload:
+      type: "object"
+      required: ["eventoId", "totalVotos", "promedio", "timestamp"]
+      properties:
+        eventoId:
+          type: "string"
+          format: "uuid"
+        totalVotos:
+          type: "integer"
+          minimum: 0
+        promedio:
+          type: "number"
+          format: "double"
+          minimum: 0
+          maximum: 5
+        distribucion:
+          type: "object"
+          properties:
+            "5": { type: "integer" }
+            "4": { type: "integer" }
+            "3": { type: "integer" }
+            "2": { type: "integer" }
+            "1": { type: "integer" }
+        timestamp:
+          type: "string"
+          format: "date-time"
+
+    WeatherAlertPayload:
+      type: "object"
+      required: ["tipo", "severidad", "mensaje", "timestamp"]
+      properties:
+        tipo:
+          type: "string"
+          enum: ["lluvia", "granizo", "viento_fuerte", "niebla", "despejado"]
+        severidad:
+          type: "string"
+          enum: ["leve", "moderada", "severa"]
+        mensaje:
+          type: "string"
+        eventosAfectados:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              eventoId: { type: "string", format: "uuid" }
+              tituloEvento: { type: "string" }
+              escenarioActual: { type: "string" }
+              escenarioAlternativoCubierto:
+                type: "object"
+                nullable: true
+                properties:
+                  id: { type: "string", format: "uuid" }
+                  nombre: { type: "string" }
+                  aforoDisponible: { type: "integer" }
+        timestamp:
+          type: "string"
+          format: "date-time"
+        vigenciaHastaEstimada:
+          type: "string"
+          format: "date-time"
+          nullable: true
+
+    FlashPerformanceAlertPayload:
+      type: "object"
+      required: ["eventoId", "nombreActo", "coordenadas", "distanciaMetros", "timestamp"]
+      properties:
+        eventoId:
+          type: "string"
+          format: "uuid"
+        nombreActo:
+          type: "string"
+        artista:
+          type: "string"
+        coordenadas:
+          $ref: "#/components/schemas/GeoPoint"
+        distanciaMetros:
+          type: "number"
+          format: "double"
+          description: "Distancia del cliente al acto en metros"
+        duracionEstimadaMinutos:
+          type: "integer"
+          nullable: true
+        timestamp:
+          type: "string"
+          format: "date-time"
+
+    UserLocationPingPayload:
+      type: "object"
+      required: ["coordenadas"]
+      properties:
+        coordenadas:
+          $ref: "#/components/schemas/GeoPoint"
+        precision:
+          type: "number"
+          format: "double"
+          description: "Precisión del GPS en metros (opcional)"
+          example: 10.5

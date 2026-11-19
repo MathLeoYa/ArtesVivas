@@ -1,0 +1,163 @@
+name: "Validación de Especificaciones (SDD Gate)"
+
+# ══════════════════════════════════════════════════════════
+# CI Pipeline — Specs Validation
+# Este workflow es el PRIMER GATE del ciclo SDD.
+# Ningún spec puede mergearse a main sin pasar estas validaciones.
+# ══════════════════════════════════════════════════════════
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "specs/**"
+  push:
+    branches: [main]
+    paths:
+      - "specs/**"
+
+jobs:
+  lint-openapi:
+    name: "🔍 Lint OpenAPI Specs (Spectral)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Spectral
+        run: npm install -g @stoplight/spectral-cli
+
+      - name: Lint — Catalog Service OpenAPI
+        run: spectral lint specs/openapi/catalog-service.yaml --ruleset .spectral.yaml --fail-severity warn
+
+      - name: Lint — Gamification Service OpenAPI
+        run: spectral lint specs/openapi/gamification-service.yaml --ruleset .spectral.yaml --fail-severity warn
+
+  lint-asyncapi:
+    name: "🔍 Lint AsyncAPI Spec (@asyncapi/cli)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install AsyncAPI CLI
+        run: npm install -g @asyncapi/cli
+
+      - name: Validate — Live Events Stream AsyncAPI
+        run: asyncapi validate specs/asyncapi/live-events-stream.yaml
+
+  validate-gherkin:
+    name: "🔍 Validar sintaxis Gherkin (BDD Features)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Gherkin parser
+        run: npm install -g @cucumber/gherkin
+
+      - name: Validate Gherkin files
+        run: |
+          for feature in specs/features/*.feature; do
+            echo "Validating $feature..."
+            npx gherkin-parser "$feature" || exit 1
+          done
+          echo "✅ Todos los archivos Gherkin son sintácticamente válidos"
+
+  check-breaking-changes:
+    name: "⚠️ Detectar Cambios Incompatibles (OpenAPI Diff)"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+
+      - name: Checkout main branch specs
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-specs
+
+      - name: Install oasdiff
+        run: |
+          curl -sSL https://raw.githubusercontent.com/Tufin/oasdiff/main/install.sh | sh
+
+      - name: Check breaking changes — Catalog API
+        run: |
+          if [ -f "main-specs/specs/openapi/catalog-service.yaml" ]; then
+            oasdiff breaking main-specs/specs/openapi/catalog-service.yaml specs/openapi/catalog-service.yaml
+          else
+            echo "Primera versión del spec — sin comparación base"
+          fi
+
+      - name: Check breaking changes — Gamification API
+        run: |
+          if [ -f "main-specs/specs/openapi/gamification-service.yaml" ]; then
+            oasdiff breaking main-specs/specs/openapi/gamification-service.yaml specs/openapi/gamification-service.yaml
+          else
+            echo "Primera versión del spec — sin comparación base"
+          fi
+
+  generate-types-preview:
+    name: "⚙️ Preview: Generación de Tipos TypeScript"
+    runs-on: ubuntu-latest
+    needs: [lint-openapi, lint-asyncapi]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install openapi-typescript
+        run: npm install -g openapi-typescript
+
+      - name: Generate TypeScript types from Catalog spec
+        run: |
+          npx openapi-typescript specs/openapi/catalog-service.yaml --output packages/shared-contracts/src/catalog.types.ts
+          echo "✅ Tipos de Catalog Service generados"
+
+      - name: Generate TypeScript types from Gamification spec
+        run: |
+          npx openapi-typescript specs/openapi/gamification-service.yaml --output packages/shared-contracts/src/gamification.types.ts
+          echo "✅ Tipos de Gamification Service generados"
+
+      - name: Upload generated types as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-types
+          path: packages/shared-contracts/src/
+
+  summary:
+    name: "✅ Resumen de Validación de Specs"
+    runs-on: ubuntu-latest
+    needs: [lint-openapi, lint-asyncapi, validate-gherkin]
+    if: always()
+    steps:
+      - name: Reporte de estado
+        run: |
+          echo "## 📋 Reporte de Validación SDD" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Spec | Estado |" >> $GITHUB_STEP_SUMMARY
+          echo "|:-----|:-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| OpenAPI: catalog-service.yaml | ${{ needs.lint-openapi.result == 'success' && '✅ Válido' || '❌ Falló' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| OpenAPI: gamification-service.yaml | ${{ needs.lint-openapi.result == 'success' && '✅ Válido' || '❌ Falló' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AsyncAPI: live-events-stream.yaml | ${{ needs.lint-asyncapi.result == 'success' && '✅ Válido' || '❌ Falló' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Gherkin BDD: features/*.feature | ${{ needs.validate-gherkin.result == 'success' && '✅ Válido' || '❌ Falló' }} |" >> $GITHUB_STEP_SUMMARY

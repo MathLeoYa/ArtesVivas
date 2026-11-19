@@ -1,0 +1,38 @@
+{
+  "name": "artes-vivas-loja",
+  "version": "1.0.0",
+  "description": "Pulso Loja — Plataforma digital para el Festival Internacional de Artes Vivas de Loja (FIAVL)",
+  "private": true,
+  "workspaces": [
+    "services/*",
+    "packages/*",
+    "frontend"
+  ],
+  "scripts": {
+    "specs:validate": "pnpm run specs:lint:openapi && pnpm run specs:lint:asyncapi && pnpm run specs:lint:gherkin",
+    "specs:lint:openapi": "spectral lint specs/openapi/*.yaml --ruleset .spectral.yaml",
+    "specs:lint:asyncapi": "asyncapi validate specs/asyncapi/live-events-stream.yaml",
+    "specs:lint:gherkin": "echo 'Validating Gherkin files...' && node scripts/validate-gherkin.js",
+    "specs:mock": "docker-compose --profile mock up mock-catalog mock-gamification",
+    "specs:generate:types": "node scripts/generate-types.js",
+    "dev": "docker-compose up postgres redis traefik && pnpm run --parallel dev:services",
+    "dev:services": "concurrently \"pnpm --filter catalog-service dev\" \"pnpm --filter telemetry-service dev\" \"pnpm --filter gamification-service dev\" \"pnpm --filter frontend dev\"",
+    "build": "pnpm run --recursive build",
+    "test": "pnpm run --recursive test",
+    "test:contracts": "pnpm run --recursive test:contracts",
+    "lint": "pnpm run --recursive lint",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0",
+    "openapi-typescript": "^7.0.0",
+    "@stoplight/spectral-cli": "^6.11.0",
+    "@asyncapi/cli": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

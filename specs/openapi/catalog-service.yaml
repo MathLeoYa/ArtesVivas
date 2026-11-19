@@ -1,0 +1,761 @@
+openapi: "3.1.0"
+info:
+  title: "Pulso Loja — Catalog Service API"
+  description: |
+    # Catalog Service
+    Gestión del catálogo del Festival Internacional de Artes Vivas de Loja (FIAVL).
+
+    ## Dominio
+    Este servicio es el **corazón del festival**: administra todos los eventos culturales
+    (obras de sala, flash-performances callejeras, talleres), los escenarios/sedes,
+    y la programación horaria completa.
+
+    ## Eventos de Dominio que emite (via Redis Pub/Sub)
+    - `EventCreated` → notifica a telemetry-service para actualizar el mapa
+    - `EventUpdated` → notifica a clientes vía WebSocket
+    - `EventCancelled` → notifica a telemetry-service para limpiar geocercas
+    - `FlashPerformanceStarted` → dispara notificaciones push georreferenciadas
+    - `EventRelocated` → se activa cuando el clima obliga a cambiar escenario
+
+    ## Metodología SDD
+    **Este archivo es el contrato inmutable.** Ningún código de implementación
+    debe desviarse de lo aquí definido. Cambios requieren PR aprobado por el equipo.
+
+  version: "1.0.0"
+  contact:
+    name: "Mateo — Equipo Pulso Loja"
+  license:
+    name: "MIT"
+
+servers:
+  - url: "http://localhost:3001"
+    description: "Desarrollo local"
+  - url: "https://api.pulsaloja.ec/catalog"
+    description: "Producción"
+
+tags:
+  - name: "events"
+    description: "Gestión de eventos culturales del festival"
+  - name: "venues"
+    description: "Escenarios y sedes del festival"
+  - name: "schedule"
+    description: "Programación horaria del festival"
+  - name: "map"
+    description: "Datos geoespaciales para el mapa interactivo"
+
+paths:
+  /api/v1/events:
+    get:
+      operationId: "listEvents"
+      tags: ["events"]
+      summary: "Listar eventos del festival"
+      description: |
+        Retorna la lista de eventos con soporte de filtros múltiples.
+        Los resultados se sirven desde caché Redis con TTL de 60 segundos
+        para optimizar lecturas masivas durante el festival.
+      parameters:
+        - name: "categoria"
+          in: "query"
+          required: false
+          schema:
+            $ref: "#/components/schemas/ArtCategory"
+          description: "Filtrar por categoría artística"
+        - name: "fecha"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            format: "date"
+            example: "2026-10-15"
+          description: "Filtrar por fecha (YYYY-MM-DD)"
+        - name: "estado"
+          in: "query"
+          required: false
+          schema:
+            $ref: "#/components/schemas/EventStatus"
+        - name: "escenario_id"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            format: "uuid"
+        - name: "page"
+          in: "query"
+          schema:
+            type: "integer"
+            minimum: 1
+            default: 1
+        - name: "limit"
+          in: "query"
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: "Lista de eventos"
+          headers:
+            X-Total-Count:
+              schema:
+                type: "integer"
+              description: "Total de eventos sin paginar"
+            X-Cache:
+              schema:
+                type: "string"
+                enum: ["HIT", "MISS"]
+              description: "Indica si la respuesta vino de caché Redis"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      $ref: "#/components/schemas/EventSummary"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+              example:
+                data:
+                  - id: "550e8400-e29b-41d4-a716-446655440000"
+                    titulo: "Danza de los Saraguros"
+                    categoria: "danza"
+                    estado: "programado"
+                    fecha: "2026-10-15"
+                    horaInicio: "19:00"
+                    duracionMinutos: 60
+                    escenario:
+                      id: "venue-001"
+                      nombre: "Plaza San Sebastián"
+                    coordenadas:
+                      lat: -3.9985
+                      lng: -79.1972
+                    afoRoActual: 120
+                    aforoMaximo: 500
+                pagination:
+                  page: 1
+                  limit: 20
+                  total: 47
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      operationId: "createEvent"
+      tags: ["events"]
+      summary: "Crear nuevo evento (admin/curador)"
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEventRequest"
+      responses:
+        "201":
+          description: "Evento creado exitosamente. Se emite evento de dominio `EventCreated` al bus."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/events/{id}:
+    get:
+      operationId: "getEventById"
+      tags: ["events"]
+      summary: "Obtener detalle completo de un evento"
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      responses:
+        "200":
+          description: "Detalle del evento"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    patch:
+      operationId: "updateEvent"
+      tags: ["events"]
+      summary: "Actualizar estado o datos de un evento"
+      description: |
+        Permite actualizar parcialmente un evento. Los cambios de estado
+        (`cancelado`, `reubicado`) emiten eventos de dominio correspondientes al bus Redis.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEventRequest"
+      responses:
+        "200":
+          description: "Evento actualizado. Se emite `EventUpdated` o `EventCancelled` según el cambio."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/events/{id}/flash:
+    post:
+      operationId: "registerFlashPerformance"
+      tags: ["events"]
+      summary: "Registrar flash-performance callejera en curso"
+      description: |
+        Permite a un artista registrado en el festival anunciar un acto espontáneo
+        desde su ubicación GPS actual. El sistema valida que la ubicación esté
+        dentro del perímetro del festival (definido en las reglas BDD del Spec 4).
+
+        Al crearse, emite `FlashPerformanceStarted` → telemetry-service notifica
+        a espectadores en un radio de 500m via WebSocket.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FlashPerformanceRequest"
+      responses:
+        "201":
+          description: "Flash-performance registrada. Notificación enviada a espectadores cercanos."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          description: "Ubicación fuera del perímetro del festival"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "OUTSIDE_FESTIVAL_PERIMETER"
+                message: "Tu ubicación no está dentro del área del festival"
+                details:
+                  perimertoKm: 2.5
+                  ubicacionActual:
+                    lat: -4.1200
+                    lng: -79.3000
+
+  /api/v1/venues:
+    get:
+      operationId: "listVenues"
+      tags: ["venues"]
+      summary: "Listar escenarios y sedes del festival"
+      responses:
+        "200":
+          description: "Lista de escenarios"
+          content:
+            application/json:
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/Venue"
+
+  /api/v1/venues/{id}:
+    get:
+      operationId: "getVenueById"
+      tags: ["venues"]
+      summary: "Detalle de un escenario con aforo actual"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "Detalle del escenario incluyendo aforo actual desde telemetry-service"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VenueDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/schedule:
+    get:
+      operationId: "getDailySchedule"
+      tags: ["schedule"]
+      summary: "Programación completa del festival"
+      parameters:
+        - name: "fecha"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            format: "date"
+          description: "Fecha específica. Si se omite, retorna toda la programación."
+      responses:
+        "200":
+          description: "Programación horaria agrupada por día y escenario"
+          content:
+            application/json:
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/DaySchedule"
+
+  /api/v1/map/points:
+    get:
+      operationId: "getMapPoints"
+      tags: ["map"]
+      summary: "Puntos de interés para el mapa interactivo"
+      description: |
+        Retorna todos los puntos activos para el mapa: eventos programados,
+        flash-performances en curso, hitos culturales (sellos del pasaporte),
+        escenarios. Optimizado para renderizado en MapLibre GL.
+      parameters:
+        - name: "tipos"
+          in: "query"
+          required: false
+          schema:
+            type: "array"
+            items:
+              type: "string"
+              enum: ["evento", "flash", "hito", "escenario"]
+          style: "form"
+          explode: false
+          description: "Filtrar tipos de punto a incluir"
+      responses:
+        "200":
+          description: "GeoJSON FeatureCollection con todos los puntos activos"
+          content:
+            application/geo+json:
+              schema:
+                $ref: "#/components/schemas/GeoJSONFeatureCollection"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: "http"
+      scheme: "bearer"
+      bearerFormat: "JWT"
+
+  parameters:
+    EventId:
+      name: "id"
+      in: "path"
+      required: true
+      schema:
+        type: "string"
+        format: "uuid"
+      description: "UUID del evento"
+
+  schemas:
+    ArtCategory:
+      type: "string"
+      enum:
+        - "teatro"
+        - "danza"
+        - "musica"
+        - "artes_visuales"
+        - "performance"
+        - "circo"
+        - "cine"
+        - "taller"
+        - "flash"
+      description: "Categoría artística del evento"
+
+    EventStatus:
+      type: "string"
+      enum:
+        - "programado"
+        - "en_vivo"
+        - "finalizado"
+        - "cancelado"
+        - "reubicando"
+      description: |
+        Estado del evento:
+        - `programado`: futuro, aún no comenzado
+        - `en_vivo`: ocurriendo ahora mismo
+        - `finalizado`: terminado normalmente
+        - `cancelado`: cancelado definitivamente
+        - `reubicando`: en proceso de cambio de escenario (típicamente por lluvia)
+
+    VenueType:
+      type: "string"
+      enum:
+        - "sala_cubierta"
+        - "plaza"
+        - "calle"
+        - "parque"
+        - "teatro"
+        - "museo"
+
+    CapacityLevel:
+      type: "string"
+      enum:
+        - "verde"
+        - "amarillo"
+        - "rojo"
+        - "cerrado"
+      description: |
+        Semáforo de aforo:
+        - `verde`: < 70% de capacidad
+        - `amarillo`: 70-99% de capacidad
+        - `rojo`: 100% — no admite más personas
+        - `cerrado`: escenario cerrado temporalmente
+
+    GeoPoint:
+      type: "object"
+      required: ["lat", "lng"]
+      properties:
+        lat:
+          type: "number"
+          format: "double"
+          minimum: -90
+          maximum: 90
+          example: -3.9985
+        lng:
+          type: "number"
+          format: "double"
+          minimum: -180
+          maximum: 180
+          example: -79.1972
+
+    Artist:
+      type: "object"
+      required: ["id", "nombre"]
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        nombre:
+          type: "string"
+          example: "Colectivo Máscaras"
+        pais:
+          type: "string"
+          example: "Ecuador"
+        bio:
+          type: "string"
+
+    Venue:
+      type: "object"
+      required: ["id", "nombre", "tipo", "coordenadas", "capacidadMaxima"]
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        nombre:
+          type: "string"
+          example: "Plaza San Sebastián"
+        tipo:
+          $ref: "#/components/schemas/VenueType"
+        coordenadas:
+          $ref: "#/components/schemas/GeoPoint"
+        capacidadMaxima:
+          type: "integer"
+          minimum: 1
+          example: 500
+        esCubierto:
+          type: "boolean"
+          description: "Si el escenario es techado (relevante para alertas de lluvia)"
+        descripcion:
+          type: "string"
+        fotoUrl:
+          type: "string"
+          format: "uri"
+
+    VenueDetail:
+      allOf:
+        - $ref: "#/components/schemas/Venue"
+        - type: "object"
+          properties:
+            aforoActual:
+              type: "integer"
+              description: "Dato en tiempo real del telemetry-service vía Redis"
+            nivelAforo:
+              $ref: "#/components/schemas/CapacityLevel"
+            eventosHoy:
+              type: "array"
+              items:
+                $ref: "#/components/schemas/EventSummary"
+
+    EventSummary:
+      type: "object"
+      required: ["id", "titulo", "categoria", "estado", "fecha", "horaInicio", "coordenadas"]
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        titulo:
+          type: "string"
+          example: "Danza de los Saraguros"
+        categoria:
+          $ref: "#/components/schemas/ArtCategory"
+        estado:
+          $ref: "#/components/schemas/EventStatus"
+        fecha:
+          type: "string"
+          format: "date"
+        horaInicio:
+          type: "string"
+          pattern: "^([01]\\d|2[0-3]):[0-5]\\d$"
+          example: "19:00"
+        duracionMinutos:
+          type: "integer"
+          minimum: 1
+        escenario:
+          type: "object"
+          properties:
+            id:
+              type: "string"
+              format: "uuid"
+            nombre:
+              type: "string"
+        coordenadas:
+          $ref: "#/components/schemas/GeoPoint"
+        aforoActual:
+          type: "integer"
+        aforoMaximo:
+          type: "integer"
+
+    Event:
+      allOf:
+        - $ref: "#/components/schemas/EventSummary"
+        - type: "object"
+          properties:
+            descripcion:
+              type: "string"
+            artistas:
+              type: "array"
+              items:
+                $ref: "#/components/schemas/Artist"
+            escenarioDetalle:
+              $ref: "#/components/schemas/Venue"
+            esFlash:
+              type: "boolean"
+              default: false
+              description: "Si es una flash-performance callejera espontánea"
+            createdAt:
+              type: "string"
+              format: "date-time"
+            updatedAt:
+              type: "string"
+              format: "date-time"
+
+    CreateEventRequest:
+      type: "object"
+      required: ["titulo", "categoria", "fecha", "horaInicio", "duracionMinutos", "escenarioId"]
+      properties:
+        titulo:
+          type: "string"
+          minLength: 3
+          maxLength: 150
+        descripcion:
+          type: "string"
+          maxLength: 2000
+        categoria:
+          $ref: "#/components/schemas/ArtCategory"
+        fecha:
+          type: "string"
+          format: "date"
+        horaInicio:
+          type: "string"
+          pattern: "^([01]\\d|2[0-3]):[0-5]\\d$"
+        duracionMinutos:
+          type: "integer"
+          minimum: 5
+          maximum: 480
+        escenarioId:
+          type: "string"
+          format: "uuid"
+        artistaIds:
+          type: "array"
+          items:
+            type: "string"
+            format: "uuid"
+
+    UpdateEventRequest:
+      type: "object"
+      minProperties: 1
+      properties:
+        estado:
+          $ref: "#/components/schemas/EventStatus"
+        escenarioId:
+          type: "string"
+          format: "uuid"
+          description: "Nuevo escenario (para reubicaciones por clima)"
+        horaInicio:
+          type: "string"
+          pattern: "^([01]\\d|2[0-3]):[0-5]\\d$"
+        titulo:
+          type: "string"
+
+    FlashPerformanceRequest:
+      type: "object"
+      required: ["nombre", "coordenadas", "duracionEstimadaMinutos"]
+      properties:
+        nombre:
+          type: "string"
+          minLength: 3
+          maxLength: 100
+          example: "Máscaras Rituales — Improvisación"
+        descripcion:
+          type: "string"
+          maxLength: 500
+        coordenadas:
+          $ref: "#/components/schemas/GeoPoint"
+        duracionEstimadaMinutos:
+          type: "integer"
+          minimum: 5
+          maximum: 120
+        radioNotificacionMetros:
+          type: "integer"
+          minimum: 100
+          maximum: 1000
+          default: 500
+          description: "Radio en metros para notificar a espectadores cercanos"
+
+    DaySchedule:
+      type: "object"
+      properties:
+        fecha:
+          type: "string"
+          format: "date"
+        slots:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              horaInicio:
+                type: "string"
+              horaFin:
+                type: "string"
+              evento:
+                $ref: "#/components/schemas/EventSummary"
+
+    GeoJSONFeatureCollection:
+      type: "object"
+      required: ["type", "features"]
+      properties:
+        type:
+          type: "string"
+          enum: ["FeatureCollection"]
+        features:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              type:
+                type: "string"
+                enum: ["Feature"]
+              geometry:
+                type: "object"
+                properties:
+                  type:
+                    type: "string"
+                    enum: ["Point"]
+                  coordinates:
+                    type: "array"
+                    items:
+                      type: "number"
+              properties:
+                type: "object"
+                properties:
+                  id:
+                    type: "string"
+                  tipo:
+                    type: "string"
+                    enum: ["evento", "flash", "hito", "escenario"]
+                  titulo:
+                    type: "string"
+                  estado:
+                    type: "string"
+                  nivelAforo:
+                    $ref: "#/components/schemas/CapacityLevel"
+
+    Pagination:
+      type: "object"
+      properties:
+        page:
+          type: "integer"
+        limit:
+          type: "integer"
+        total:
+          type: "integer"
+
+    ErrorResponse:
+      type: "object"
+      required: ["code", "message"]
+      properties:
+        code:
+          type: "string"
+        message:
+          type: "string"
+        details:
+          type: "object"
+        timestamp:
+          type: "string"
+          format: "date-time"
+
+  responses:
+    BadRequest:
+      description: "Solicitud malformada"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: "No autenticado — se requiere JWT válido"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: "No autorizado — permisos insuficientes (se requiere rol curador o admin)"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: "Recurso no encontrado"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UnprocessableEntity:
+      description: "Datos válidos en formato pero con errores de negocio"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: "Error interno del servidor"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
