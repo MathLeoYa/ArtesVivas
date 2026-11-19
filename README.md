@@ -62,12 +62,12 @@ pnpm run dev
 
 ## 📋 Especificaciones (SDD — Single Source of Truth)
 
-| Spec | Tipo | Archivo | Owner |
-|:---|:---|:---|:---|
-| Spec 1: Catalog API | OpenAPI 3.1 | [`specs/openapi/catalog-service.yaml`](./specs/openapi/catalog-service.yaml) | Mateo |
-| Spec 2: Gamification API | OpenAPI 3.1 | [`specs/openapi/gamification-service.yaml`](./specs/openapi/gamification-service.yaml) | Integrante 2 |
-| Spec 3: Live Stream | AsyncAPI 3.0 | [`specs/asyncapi/live-events-stream.yaml`](./specs/asyncapi/live-events-stream.yaml) | Integrante 3 |
-| Spec 4: BDD Rules | Gherkin | [`specs/features/`](./specs/features/) | Mateo |
+| Spec | Tipo | Archivo / Rama | Owner | Estado |
+|:---|:---|:---|:---|:---|
+| **Spec 1: Catalog API** | OpenAPI 3.1 | [`specs/openapi/catalog-service.yaml`](./specs/openapi/catalog-service.yaml) | Mateo | ✅ En `main` |
+| **Spec 2: Gamification API** | OpenAPI 3.1 | `specs/openapi/gamification-service.yaml` | Integrante 2 | ⏳ Pendiente (Rama `spec/gamification-api`) |
+| **Spec 3: Live Stream** | AsyncAPI 3.0 | `specs/asyncapi/live-events-stream.yaml` | Integrante 3 | ⏳ Pendiente (Rama `spec/live-stream`) |
+| **Spec 4: BDD Rules** | Gherkin | [`specs/features/`](./specs/features/) | Mateo | ✅ En `main` |
 
 ## 🔄 Flujo de Trabajo (Branch-Based SDD)
 

@@ -35,8 +35,13 @@ jobs:
       - name: Lint — Catalog Service OpenAPI
         run: spectral lint specs/openapi/catalog-service.yaml --ruleset .spectral.yaml --fail-severity warn
 
-      - name: Lint — Gamification Service OpenAPI
-        run: spectral lint specs/openapi/gamification-service.yaml --ruleset .spectral.yaml --fail-severity warn
+      - name: Lint — Gamification Service OpenAPI (si existe)
+        run: |
+          if [ -f "specs/openapi/gamification-service.yaml" ]; then
+            spectral lint specs/openapi/gamification-service.yaml --ruleset .spectral.yaml --fail-severity warn
+          else
+            echo "Spec 2 no presente aún (en desarrollo por Integrante 2)"
+          fi
 
   lint-asyncapi:
     name: "🔍 Lint AsyncAPI Spec (@asyncapi/cli)"
@@ -53,8 +58,13 @@ jobs:
       - name: Install AsyncAPI CLI
         run: npm install -g @asyncapi/cli
 
-      - name: Validate — Live Events Stream AsyncAPI
-        run: asyncapi validate specs/asyncapi/live-events-stream.yaml
+      - name: Validate — Live Events Stream AsyncAPI (si existe)
+        run: |
+          if [ -f "specs/asyncapi/live-events-stream.yaml" ]; then
+            asyncapi validate specs/asyncapi/live-events-stream.yaml
+          else
+            echo "Spec 3 no presente aún (en desarrollo por Integrante 3)"
+          fi
 
   validate-gherkin:
     name: "🔍 Validar sintaxis Gherkin (BDD Features)"
@@ -134,10 +144,12 @@ jobs:
           npx openapi-typescript specs/openapi/catalog-service.yaml --output packages/shared-contracts/src/catalog.types.ts
           echo "✅ Tipos de Catalog Service generados"
 
-      - name: Generate TypeScript types from Gamification spec
+      - name: Generate TypeScript types from Gamification spec (si existe)
         run: |
-          npx openapi-typescript specs/openapi/gamification-service.yaml --output packages/shared-contracts/src/gamification.types.ts
-          echo "✅ Tipos de Gamification Service generados"
+          if [ -f "specs/openapi/gamification-service.yaml" ]; then
+            npx openapi-typescript specs/openapi/gamification-service.yaml --output packages/shared-contracts/src/gamification.types.ts
+            echo "✅ Tipos de Gamification Service generados"
+          fi
 
       - name: Upload generated types as artifact
         uses: actions/upload-artifact@v4
