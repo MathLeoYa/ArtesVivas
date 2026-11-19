@@ -184,6 +184,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Event"
+              example:
+                id: "550e8400-e29b-41d4-a716-446655440000"
+                titulo: "Danza de los Saraguros"
+                categoria: "danza"
+                estado: "en_vivo"
+                fecha: "2026-10-15"
+                horaInicio: "19:00"
+                duracionMinutos: 60
+                escenario:
+                  id: "venue-001"
+                  nombre: "Plaza San Sebastián"
+                coordenadas:
+                  lat: -3.9985
+                  lng: -79.1972
+                aforoActual: 234
+                aforoMaximo: 500
+                descripcion: "Danza ritual de la nacionalidad Saraguro presentada en el marco del FIAVL."
+                artistas:
+                  - id: "artist-001"
+                    nombre: "Colectivo Saraguro Kawsay"
+                    pais: "Ecuador"
+                esFlash: false
+                createdAt: "2026-09-01T10:00:00Z"
+                updatedAt: "2026-10-15T19:05:00Z"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -665,6 +689,16 @@ components:
     CreateEventRequest:
       type: "object"
       required: ["titulo", "categoria", "fecha", "horaInicio", "duracionMinutos", "escenarioId"]
+      example:
+        titulo: "Percusión Amazónica — Colectivo Kichwa"
+        descripcion: "Acto de percusión tradicional amazónica en el marco del FIAVL."
+        categoria: "musica"
+        fecha: "2026-10-16"
+        horaInicio: "20:00"
+        duracionMinutos: 90
+        escenarioId: "venue-001"
+        artistaIds:
+          - "artist-002"
       properties:
         titulo:
           type: "string"
@@ -737,6 +771,7 @@ components:
 
     DaySchedule:
       type: "object"
+      required: ["fecha", "slots"]
       properties:
         fecha:
           type: "string"
@@ -745,6 +780,7 @@ components:
           type: "array"
           items:
             type: "object"
+            required: ["horaInicio", "horaFin", "evento"]
             properties:
               horaInicio:
                 type: "string"
