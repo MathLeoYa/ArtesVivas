@@ -131,7 +131,7 @@ paths:
                     coordenadas:
                       lat: -3.9985
                       lng: -79.1972
-                    afoRoActual: 120
+                    aforoActual: 120
                     aforoMaximo: 500
                 pagination:
                   page: 1
@@ -220,22 +220,50 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /api/v1/events/{id}/flash:
+    delete:
+      operationId: "deleteEvent"
+      tags: ["events"]
+      summary: "Eliminar un evento permanentemente (solo admin)"
+      description: |
+        Elimina un evento de forma permanente de la base de datos.
+        Solo disponible para usuarios con rol `admin`.
+        
+        **Diferencia con PATCH estado=cancelado:**
+        - `PATCH cancelado`: el evento sigue existiendo, es visible como cancelado, útil para histórico.
+        - `DELETE`: eliminación física, solo para datos erróneos o de prueba. No usar en festival activo.
+        
+        Al ejecutarse, emite `EventDeleted` al bus Redis para limpiar el mapa y caché.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      responses:
+        "204":
+          description: "Evento eliminado exitosamente. Se emite `EventDeleted` al bus Redis."
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/events/flash:
     post:
       operationId: "registerFlashPerformance"
       tags: ["events"]
       summary: "Registrar flash-performance callejera en curso"
       description: |
         Permite a un artista registrado en el festival anunciar un acto espontáneo
-        desde su ubicación GPS actual. El sistema valida que la ubicación esté
-        dentro del perímetro del festival (definido en las reglas BDD del Spec 4).
+        desde su ubicación GPS actual. Este endpoint crea un **nuevo evento** de tipo `flash`.
+        
+        El sistema valida:
+        1. Que el artista tenga rol `artista` (JWT con claim `role: artista`)
+        2. Que las coordenadas enviadas estén dentro del perímetro del festival (radio 2.5km)
 
-        Al crearse, emite `FlashPerformanceStarted` → telemetry-service notifica
-        a espectadores en un radio de 500m via WebSocket.
+        Al crearse exitosamente, emite `FlashPerformanceStarted` al bus Redis →
+        telemetry-service notifica a espectadores en un radio de 500m via WebSocket.
       security:
         - BearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/EventId"
       requestBody:
         required: true
         content:
@@ -282,6 +310,34 @@ paths:
                 type: "array"
                 items:
                   $ref: "#/components/schemas/Venue"
+              example:
+                - id: "venue-001"
+                  nombre: "Plaza San Sebastián"
+                  tipo: "plaza"
+                  coordenadas:
+                    lat: -3.9985
+                    lng: -79.1972
+                  capacidadMaxima: 500
+                  esCubierto: false
+                  descripcion: "Plaza principal del centro histórico de Loja"
+                - id: "venue-002"
+                  nombre: "Teatro Benjamín Carrión"
+                  tipo: "teatro"
+                  coordenadas:
+                    lat: -3.9970
+                    lng: -79.1980
+                  capacidadMaxima: 300
+                  esCubierto: true
+                  descripcion: "Teatro principal del festival con aforo cubierto"
+                - id: "venue-003"
+                  nombre: "Calle Lourdes"
+                  tipo: "calle"
+                  coordenadas:
+                    lat: -3.9995
+                    lng: -79.1960
+                  capacidadMaxima: 1000
+                  esCubierto: false
+                  descripcion: "Calle peatonal histórica, escenario de flash-performances"
 
   /api/v1/venues/{id}:
     get:
@@ -327,6 +383,45 @@ paths:
                 type: "array"
                 items:
                   $ref: "#/components/schemas/DaySchedule"
+              example:
+                - fecha: "2026-10-15"
+                  slots:
+                    - horaInicio: "18:00"
+                      horaFin: "19:00"
+                      evento:
+                        id: "550e8400-e29b-41d4-a716-446655440000"
+                        titulo: "Apertura del Festival — Danza de los Saraguros"
+                        categoria: "danza"
+                        estado: "programado"
+                        fecha: "2026-10-15"
+                        horaInicio: "18:00"
+                        duracionMinutos: 60
+                        escenario:
+                          id: "venue-001"
+                          nombre: "Plaza San Sebastián"
+                        coordenadas:
+                          lat: -3.9985
+                          lng: -79.1972
+                        aforoActual: 0
+                        aforoMaximo: 500
+                    - horaInicio: "20:00"
+                      horaFin: "21:30"
+                      evento:
+                        id: "660e9500-e29b-41d4-a716-556655440001"
+                        titulo: "Máscaras y Ritos — Teatro Experimental"
+                        categoria: "teatro"
+                        estado: "programado"
+                        fecha: "2026-10-15"
+                        horaInicio: "20:00"
+                        duracionMinutos: 90
+                        escenario:
+                          id: "venue-002"
+                          nombre: "Teatro Benjamín Carrión"
+                        coordenadas:
+                          lat: -3.9970
+                          lng: -79.1980
+                        aforoActual: 0
+                        aforoMaximo: 300
 
   /api/v1/map/points:
     get:
