@@ -25,26 +25,26 @@ gitGraph
     commit id: "setup: repo base" tag: "v0.1.0"
     
     %% Mateo trabaja en Spec 1 y Spec 4
-    branch spec/catalog-api
-    checkout spec/catalog-api
+    branch feature/spec-1
+    checkout feature/spec-1
     commit id: "feat(spec1): openapi catalog-service"
     checkout main
-    merge spec/catalog-api id: "PR #1: Spec 1 Aprobado"
+    merge feature/spec-1 id: "PR #1: Spec 1 Aprobado"
     
     %% Integrante 2 trabaja en Spec 2
-    branch spec/gamification-api
-    checkout spec/gamification-api
+    branch feature/spec-2
+    checkout feature/spec-2
     commit id: "feat(spec2): openapi gamification"
     
     %% Integrante 3 trabaja en Spec 3
-    branch spec/live-stream
-    checkout spec/live-stream
+    branch feature/spec-3
+    checkout feature/spec-3
     commit id: "feat(spec3): asyncapi websockets"
     
     %% Integrante 2 y 3 se mergean tras aprobacion
     checkout main
-    merge spec/gamification-api id: "PR #2: Spec 2 Aprobado"
-    merge spec/live-stream id: "PR #3: Spec 3 Aprobado"
+    merge feature/spec-2 id: "PR #2: Spec 2 Aprobado"
+    merge feature/spec-3 id: "PR #3: Spec 3 Aprobado"
     
     %% Implementación posterior
     branch feat/catalog-service
@@ -56,39 +56,39 @@ gitGraph
 
 ## 3. Instrucciones Paso a Paso por Integrante
 
-### 👤 Integrante 1: Mateo (Tú)
+### 👤 Integrante 1: Mateo (Líder)
 * **Tus ramas:**
-  * `spec/catalog-api` → Creación y ajustes del Spec 1 (OpenAPI del Catálogo). *(Ya listo en `main`)*.
-  * `spec/bdd-rules` → Escenarios de negocio Gherkin BDD (Spec 4).
+  * `feature/spec-1` → Creación y ajustes del Spec 1 (OpenAPI del Catálogo). *(Completado y mergeado en `main`)*.
+  * `feature/spec-4` → Escenarios de negocio Gherkin BDD (Spec 4).
   * `feat/catalog-service` → Implementación del microservicio de catálogo.
 * **Acción en GitKraken:**
-  1. Click derecho sobre `main` → **Create branch here** → `spec/bdd-rules`.
+  1. Click derecho sobre `main` → **Create branch here** → `feature/spec-4`.
   2. Commitear los archivos `.feature` de pruebas.
   3. Push y crear Pull Request hacia `main`.
 
 ---
 
 ### 👤 Integrante 2
-* **Su rama:** `spec/gamification-api`
+* **Su rama:** `feature/spec-2`
 * **Su responsabilidad:** Elaborar el Spec 2 (OpenAPI de gamificación, pasaporte y votos).
 * **Acción en GitKraken:**
-  1. Click derecho sobre `main` → **Create branch here** → `spec/gamification-api`.
+  1. Click derecho sobre `main` → **Create branch here** → `feature/spec-2`.
   2. Agregar `specs/openapi/gamification-service.yaml`.
   3. En GitKraken, hacer stage de los cambios en el panel derecho.
   4. Mensaje de commit: `feat(spec2): definir contrato openapi para gamification-service`.
-  5. Click en **Push** y abrir Pull Request en GitHub.
+  5. Click en **Push** y abrir Pull Request en GitHub hacia `main`.
   6. Pedir la revisión y aprobación de Mateo y del Integrante 3.
 
 ---
 
 ### 👤 Integrante 3
-* **Su rama:** `spec/live-stream`
+* **Su rama:** `feature/spec-3`
 * **Su responsabilidad:** Elaborar el Spec 3 (AsyncAPI de WebSockets y telemetría en vivo).
 * **Acción en GitKraken:**
-  1. Click derecho sobre `main` → **Create branch here** → `spec/live-stream`.
+  1. Click derecho sobre `main` → **Create branch here** → `feature/spec-3`.
   2. Agregar `specs/asyncapi/live-events-stream.yaml`.
   3. Mensaje de commit: `feat(spec3): definir canales asyncapi para live stream y alertas`.
-  4. Push y abrir Pull Request en GitHub.
+  4. Push y abrir Pull Request en GitHub hacia `main`.
   5. Pedir revisión y aprobación del equipo.
 
 ---

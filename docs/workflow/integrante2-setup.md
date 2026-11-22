@@ -1,8 +1,8 @@
 # Guía de incorporación — Integrante 2 (Spec 2: Gamification Service)
 
 > **Rol:** Dueño de la Spec 2 — `specs/openapi/gamification-service.yaml`  
-> **Rama de trabajo:** `spec/gamification-api`  
-> **NO tocar:** `main`, `spec/live-stream`, ni los archivos del Spec 1 o Spec 4
+> **Rama de trabajo:** `feature/spec-2`  
+> **NO tocar:** `main`, `feature/spec-3`, ni los archivos del Spec 1 o Spec 4
 
 ---
 
@@ -36,8 +36,8 @@ cd ArtesVivas
 
 ```bash
 # NUNCA trabajes en main directamente
-git checkout -b spec/gamification-api
-git push -u origin spec/gamification-api
+git checkout -b feature/spec-2
+git push -u origin feature/spec-2
 ```
 
 ---
@@ -105,7 +105,7 @@ El archivo `specs/openapi/gamification-service.yaml` que debes crear tiene este 
 
 ```bash
 # Asegurarte de estar en tu rama
-git checkout spec/gamification-api
+git checkout feature/spec-2
 
 # Jalar cambios de main (por si Mateo actualizó algo)
 git fetch origin
@@ -118,7 +118,7 @@ git add specs/openapi/gamification-service.yaml
 git commit -m "feat(spec2): agregar endpoint de votación con geofence"
 
 # Subir a GitHub
-git push origin spec/gamification-api
+git push origin feature/spec-2
 ```
 
 ---
@@ -126,8 +126,8 @@ git push origin spec/gamification-api
 ## 8. Abrir Pull Request cuando estés listo
 
 1. Ve a: https://github.com/MathLeoYa/ArtesVivas
-2. Clic en **"Compare & pull request"** para tu rama `spec/gamification-api`
-3. Base: `main` ← Compare: `spec/gamification-api`
+2. Clic en **"Compare & pull request"** para tu rama `feature/spec-2`
+3. Base: `main` ← Compare: `feature/spec-2`
 4. Título: `feat(spec2): Gamification Service OpenAPI — Pasaporte Cultural + Aplausómetro`
 5. Llena el checklist del template de PR
 6. Asigna a **Mateo** como reviewer
@@ -150,8 +150,8 @@ git push origin spec/gamification-api
 | Spec | Dueño | Rama |
 |------|-------|------|
 | Spec 1 (Catalog OpenAPI) | Mateo | `main` |
-| **Spec 2 (Gamification OpenAPI)** | **Tú** | `spec/gamification-api` |
-| Spec 3 (AsyncAPI Live Stream) | Integrante 3 | `spec/live-stream` |
+| **Spec 2 (Gamification OpenAPI)** | **Tú** | `feature/spec-2` |
+| Spec 3 (AsyncAPI Live Stream) | Integrante 3 | `feature/spec-3` |
 | Spec 4 (Gherkin BDD) | Mateo | `main` |
 
 Tu spec referencia eventos del Spec 1 (IDs de eventos para votación) y es consumida por el Spec 3 (el canal `liveVoteCount` del WebSocket usa los datos que tu servicio emite).

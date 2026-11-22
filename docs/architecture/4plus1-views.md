@@ -219,8 +219,8 @@ flowchart TD
     subgraph Monorepo["📦 Monorepo — pnpm workspaces"]
         subgraph Specs["specs/ — Contratos (SDD)"]
             OA1["specs/openapi/\ncatalog-service.yaml\n✅ Spec 1 — Mateo"]
-            OA2["specs/openapi/\ngamification-service.yaml\n🔀 Spec 2 — branch: spec/gamification-api"]
-            AA3["specs/asyncapi/\nlive-events-stream.yaml\n🔀 Spec 3 — branch: spec/live-stream"]
+            OA2["specs/openapi/\ngamification-service.yaml\n🔀 Spec 2 — branch: feature/spec-2"]
+            AA3["specs/asyncapi/\nlive-events-stream.yaml\n🔀 Spec 3 — branch: feature/spec-3"]
             GH4["specs/features/\n*.feature\n✅ Spec 4 — Mateo (Gherkin BDD)"]
         end
 

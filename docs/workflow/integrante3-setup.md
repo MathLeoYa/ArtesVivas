@@ -1,8 +1,8 @@
 # Guía de incorporación — Integrante 3 (Spec 3: AsyncAPI Live Stream)
 
 > **Rol:** Dueño de la Spec 3 — `specs/asyncapi/live-events-stream.yaml`  
-> **Rama de trabajo:** `spec/live-stream`  
-> **NO tocar:** `main`, `spec/gamification-api`, ni los archivos del Spec 1 o Spec 4
+> **Rama de trabajo:** `feature/spec-3`  
+> **NO tocar:** `main`, `feature/spec-2`, ni los archivos del Spec 1 o Spec 4
 
 ---
 
@@ -28,8 +28,8 @@ cd ArtesVivas
 ## 3. Crear tu rama de trabajo
 
 ```bash
-git checkout -b spec/live-stream
-git push -u origin spec/live-stream
+git checkout -b feature/spec-3
+git push -u origin feature/spec-3
 ```
 
 ---
@@ -103,7 +103,7 @@ Gamification Svc ──── PUBLISH "gamification.votes.*" ──▶ Redis Pub
 ## 7. Flujo de trabajo diario
 
 ```bash
-git checkout spec/live-stream
+git checkout feature/spec-3
 
 # Jalar cambios de main
 git fetch origin
@@ -113,7 +113,7 @@ git merge origin/main
 
 git add specs/asyncapi/live-events-stream.yaml
 git commit -m "feat(spec3): definir canal de alertas meteorologicas con venues alternativos"
-git push origin spec/live-stream
+git push origin feature/spec-3
 ```
 
 ---
@@ -121,7 +121,7 @@ git push origin spec/live-stream
 ## 8. Abrir Pull Request
 
 1. https://github.com/MathLeoYa/ArtesVivas → **"Compare & pull request"**
-2. Base: `main` ← Compare: `spec/live-stream`
+2. Base: `main` ← Compare: `feature/spec-3`
 3. Título: `feat(spec3): Live Tracking Service AsyncAPI — WebSocket channels`
 4. Llena el checklist del PR template
 5. Asigna a **Mateo** como reviewer
@@ -148,6 +148,6 @@ Y **expone** los canales WebSocket que el frontend (React+Vite) consume.
 | Spec | Dueño | Rama |
 |------|-------|------|
 | Spec 1 (Catalog OpenAPI) | Mateo | `main` |
-| Spec 2 (Gamification OpenAPI) | Integrante 2 | `spec/gamification-api` |
-| **Spec 3 (AsyncAPI Live Stream)** | **Tú** | `spec/live-stream` |
+| Spec 2 (Gamification OpenAPI) | Integrante 2 | `feature/spec-2` |
+| **Spec 3 (AsyncAPI Live Stream)** | **Tú** | `feature/spec-3` |
 | Spec 4 (Gherkin BDD) | Mateo | `main` |
