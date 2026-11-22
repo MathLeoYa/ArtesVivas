@@ -1,0 +1,596 @@
+﻿openapi: "3.1.0"
+info:
+  title: "Pulso Loja — Gamification Service API"
+  description: |
+    # Gamification Service
+    Gestión del Pasaporte Cultural Digital, Aplausómetro y sistema de Badges
+    para el Festival Internacional de Artes Vivas de Loja (FIAVL).
+
+    ## Dominio
+    - **Pasaporte Cultural**: sellos digitales por visitar escenarios y participar en actos
+    - **Aplausómetro**: votación en vivo para eventos en curso (1 voto por usuario/evento)
+    - **Badges & Rankings**: reconocimientos y clasificaciones de participación
+
+    ## Eventos de Dominio que emite (via Redis Pub/Sub)
+    - `VoteCast` → telemetry-service retransmite conteo en vivo via WebSocket
+    - `StampEarned` → se emite cuando un usuario obtiene un sello en su pasaporte
+    - `BadgeUnlocked` → se emite cuando un usuario desbloquea un badge
+
+    ## Reglas de Negocio (definidas en Spec 4 — Gherkin BDD)
+    - Un usuario puede votar UNA sola vez por evento
+    - Para votar, el usuario debe estar dentro del radio de 200m del evento (geocerca)
+    - Para obtener un sello, el usuario debe estar dentro del radio de 100m del escenario
+
+    ## Metodología SDD
+    **Este archivo es el contrato inmutable.** Cambios requieren PR aprobado por el equipo.
+
+  version: "1.0.0"
+  contact:
+    name: "Integrante 2 — Equipo Pulso Loja"
+
+servers:
+  - url: "http://localhost:3002"
+    description: "Desarrollo local"
+  - url: "https://api.pulsaloja.ec/gamification"
+    description: "Producción"
+
+tags:
+  - name: "passport"
+    description: "Pasaporte cultural digital — sellos por visitas"
+  - name: "votes"
+    description: "Aplausómetro — votación en vivo de eventos"
+  - name: "badges"
+    description: "Insignias y logros del festival"
+  - name: "rankings"
+    description: "Rankings de eventos y espectadores"
+
+paths:
+  /api/v1/passport/stamp:
+    post:
+      operationId: "stampPassport"
+      tags: ["passport"]
+      summary: "Sellar visita a un escenario/hito cultural"
+      description: |
+        Registra la visita de un espectador a un escenario o hito cultural del festival.
+        Requiere que el usuario esté dentro del radio de 100m del punto (validado por geolocalización GPS).
+        Emite evento `StampEarned` al bus Redis.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StampRequest"
+      responses:
+        "201":
+          description: "Sello registrado exitosamente en el pasaporte"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StampResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: "El usuario ya tiene un sello para este escenario/hito"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "STAMP_ALREADY_EXISTS"
+                message: "Ya tienes el sello de este escenario en tu pasaporte"
+        "422":
+          description: "El usuario está fuera del radio permitido para sellar"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "OUTSIDE_STAMP_RADIUS"
+                message: "Necesitas estar a menos de 100m del escenario para obtener el sello"
+                details:
+                  radioPermitidoMetros: 100
+                  distanciaActualMetros: 347
+
+  /api/v1/passport/{userId}:
+    get:
+      operationId: "getPassport"
+      tags: ["passport"]
+      summary: "Ver pasaporte cultural de un usuario"
+      description: "Retorna el pasaporte completo con sellos, puntos y badges desbloqueados."
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: "Pasaporte del usuario"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Passport"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/votes:
+    post:
+      operationId: "castVote"
+      tags: ["votes"]
+      summary: "Emitir voto (aplauso) para un evento en curso"
+      description: |
+        Registra el voto de un espectador para un evento que está en estado `en_vivo`.
+        Reglas de negocio (ver Spec 4 — Gherkin):
+        - Solo se puede votar una vez por evento por usuario
+        - El usuario debe estar dentro de 200m del evento
+        - Solo se puede votar si el evento está en estado `en_vivo`
+        Emite evento `VoteCast` al bus Redis → retransmisión en tiempo real via WebSocket.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CastVoteRequest"
+      responses:
+        "201":
+          description: "Voto registrado. Aplausómetro actualizado en tiempo real."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: "El usuario ya votó por este evento"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "VOTE_ALREADY_CAST"
+                message: "Ya emitiste tu voto para este evento"
+        "422":
+          description: "El evento no está en curso o el usuario está fuera del radio"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/votes/live/{eventId}:
+    get:
+      operationId: "getLiveVoteCount"
+      tags: ["votes"]
+      summary: "Conteo en vivo del aplausómetro para un evento"
+      description: |
+        Retorna el conteo actual de votos/aplausos para un evento.
+        Los datos se sirven desde Redis con alta frecuencia de actualización.
+        Para streaming en tiempo real, usar el canal WebSocket definido en Spec 3.
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      responses:
+        "200":
+          description: "Conteo actual del aplausómetro"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveVoteCount"
+              example:
+                eventoId: "550e8400-e29b-41d4-a716-446655440000"
+                totalVotos: 342
+                promedio: 4.7
+                distribucion:
+                  "5": 189
+                  "4": 98
+                  "3": 41
+                  "2": 10
+                  "1": 4
+                ultimaActualizacion: "2026-10-15T19:34:21Z"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/rankings/events:
+    get:
+      operationId: "getEventRankings"
+      tags: ["rankings"]
+      summary: "Ranking de eventos más aplaudidos del festival"
+      parameters:
+        - name: "limit"
+          in: "query"
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 10
+        - name: "categoria"
+          in: "query"
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "Top eventos por calificación promedio y total de votos"
+          content:
+            application/json:
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/EventRankingEntry"
+              example:
+                - posicion: 1
+                  eventoId: "550e8400-e29b-41d4-a716-446655440000"
+                  tituloEvento: "Danza de los Saraguros"
+                  categoria: "danza"
+                  promedioCalificacion: 4.85
+                  totalVotos: 420
+                - posicion: 2
+                  eventoId: "660e9500-e29b-41d4-a716-556655440001"
+                  tituloEvento: "Máscaras y Ritos"
+                  categoria: "teatro"
+                  promedioCalificacion: 4.70
+                  totalVotos: 310
+
+  /api/v1/rankings/users:
+    get:
+      operationId: "getUserRankings"
+      tags: ["rankings"]
+      summary: "Top exploradores del festival (más sellos y participación)"
+      parameters:
+        - name: "limit"
+          in: "query"
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        "200":
+          description: "Top usuarios por puntos acumulados"
+          content:
+            application/json:
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/UserRankingEntry"
+              example:
+                - posicion: 1
+                  userId: "770e9500-e29b-41d4-a716-666655440002"
+                  nombreUsuario: "Lucia_Loja"
+                  puntosAcumulados: 450
+                  totalSellos: 7
+                  totalVotos: 12
+                  badgesCount: 3
+                - posicion: 2
+                  userId: "880e9500-e29b-41d4-a716-776655440003"
+                  nombreUsuario: "CarlosAndes"
+                  puntosAcumulados: 320
+                  totalSellos: 5
+                  totalVotos: 8
+                  badgesCount: 2
+
+  /api/v1/badges:
+    get:
+      operationId: "listBadges"
+      tags: ["badges"]
+      summary: "Catálogo completo de badges del festival"
+      responses:
+        "200":
+          description: "Lista de todos los badges disponibles"
+          content:
+            application/json:
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/Badge"
+              example:
+                - id: "badge-001"
+                  nombre: "Explorador Andino"
+                  descripcion: "Visitaste 5 o más escenarios del festival"
+                  iconoUrl: "https://assets.pulsaloja.ec/badges/explorador.svg"
+                  criterio: "Obtener 5 sellos en el pasaporte"
+                  puntosRequeridos: 250
+                - id: "badge-002"
+                  nombre: "Crítico de Calle"
+                  descripcion: "Emitiste 3 o más votos en flash-performances"
+                  iconoUrl: "https://assets.pulsaloja.ec/badges/critico.svg"
+                  criterio: "Votar en 3 actos callejeros"
+                  puntosRequeridos: 100
+
+  /api/v1/badges/{userId}:
+    get:
+      operationId: "getUserBadges"
+      tags: ["badges"]
+      summary: "Badges desbloqueados por un usuario"
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: "Badges desbloqueados con fecha de obtención"
+          content:
+            application/json:
+              schema:
+                type: "array"
+                items:
+                  $ref: "#/components/schemas/UserBadge"
+              example:
+                - id: "badge-001"
+                  nombre: "Explorador Andino"
+                  descripcion: "Visitaste 5 o más escenarios del festival"
+                  iconoUrl: "https://assets.pulsaloja.ec/badges/explorador.svg"
+                  criterio: "Obtener 5 sellos en el pasaporte"
+                  puntosRequeridos: 250
+                  desbloqueadoEn: "2026-10-16T21:10:00Z"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: "http"
+      scheme: "bearer"
+      bearerFormat: "JWT"
+
+  parameters:
+    UserId:
+      name: "userId"
+      in: "path"
+      required: true
+      schema:
+        type: "string"
+        format: "uuid"
+      description: "UUID del usuario"
+    EventId:
+      name: "eventId"
+      in: "path"
+      required: true
+      schema:
+        type: "string"
+        format: "uuid"
+      description: "UUID del evento"
+
+  schemas:
+    GeoPoint:
+      type: "object"
+      required: ["lat", "lng"]
+      properties:
+        lat:
+          type: "number"
+          format: "double"
+          example: -3.9985
+        lng:
+          type: "number"
+          format: "double"
+          example: -79.1972
+
+    Stamp:
+      type: "object"
+      required: ["id", "escenarioId", "escenarioNombre", "obtenidoEn"]
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        escenarioId:
+          type: "string"
+          format: "uuid"
+        escenarioNombre:
+          type: "string"
+          example: "Teatro Benjamín Carrión"
+        puntosOtorgados:
+          type: "integer"
+          example: 50
+        obtenidoEn:
+          type: "string"
+          format: "date-time"
+        coordenadasAlSellar:
+          $ref: "#/components/schemas/GeoPoint"
+
+    Passport:
+      type: "object"
+      required: ["userId", "sellos", "puntosAcumulados"]
+      properties:
+        userId:
+          type: "string"
+          format: "uuid"
+        sellos:
+          type: "array"
+          items:
+            $ref: "#/components/schemas/Stamp"
+        totalSellos:
+          type: "integer"
+        puntosAcumulados:
+          type: "integer"
+        badges:
+          type: "array"
+          items:
+            $ref: "#/components/schemas/Badge"
+        createdAt:
+          type: "string"
+          format: "date-time"
+
+    StampRequest:
+      type: "object"
+      required: ["escenarioId", "coordenadasActuales"]
+      properties:
+        escenarioId:
+          type: "string"
+          format: "uuid"
+        coordenadasActuales:
+          $ref: "#/components/schemas/GeoPoint"
+
+    StampResponse:
+      type: "object"
+      properties:
+        sello:
+          $ref: "#/components/schemas/Stamp"
+        puntosNuevos:
+          type: "integer"
+        totalPuntos:
+          type: "integer"
+        badgeDesbloqueado:
+          $ref: "#/components/schemas/Badge"
+          nullable: true
+          description: "Badge desbloqueado si esta acción completó un logro"
+
+    CastVoteRequest:
+      type: "object"
+      required: ["eventoId", "calificacion", "coordenadasActuales"]
+      properties:
+        eventoId:
+          type: "string"
+          format: "uuid"
+        calificacion:
+          type: "integer"
+          minimum: 1
+          maximum: 5
+          description: "Calificación de 1 a 5 estrellas"
+        coordenadasActuales:
+          $ref: "#/components/schemas/GeoPoint"
+
+    Vote:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        eventoId:
+          type: "string"
+          format: "uuid"
+        userId:
+          type: "string"
+          format: "uuid"
+        calificacion:
+          type: "integer"
+          minimum: 1
+          maximum: 5
+        emitidoEn:
+          type: "string"
+          format: "date-time"
+
+    LiveVoteCount:
+      type: "object"
+      properties:
+        eventoId:
+          type: "string"
+          format: "uuid"
+        totalVotos:
+          type: "integer"
+        promedio:
+          type: "number"
+          format: "double"
+        distribucion:
+          type: "object"
+          properties:
+            "5": { type: "integer" }
+            "4": { type: "integer" }
+            "3": { type: "integer" }
+            "2": { type: "integer" }
+            "1": { type: "integer" }
+        ultimaActualizacion:
+          type: "string"
+          format: "date-time"
+
+    Badge:
+      type: "object"
+      required: ["id", "nombre", "descripcion", "iconoUrl"]
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        nombre:
+          type: "string"
+          example: "Explorador Andino"
+        descripcion:
+          type: "string"
+          example: "Visitaste 5 o más escenarios del festival"
+        iconoUrl:
+          type: "string"
+          format: "uri"
+        criterio:
+          type: "string"
+          description: "Regla para desbloquear el badge"
+          example: "Obtener 5 sellos en el pasaporte"
+        puntosRequeridos:
+          type: "integer"
+          nullable: true
+
+    UserBadge:
+      allOf:
+        - $ref: "#/components/schemas/Badge"
+        - type: "object"
+          properties:
+            desbloqueadoEn:
+              type: "string"
+              format: "date-time"
+
+    EventRankingEntry:
+      type: "object"
+      properties:
+        posicion:
+          type: "integer"
+        eventoId:
+          type: "string"
+          format: "uuid"
+        tituloEvento:
+          type: "string"
+        categoria:
+          type: "string"
+        promedioCalificacion:
+          type: "number"
+          format: "double"
+        totalVotos:
+          type: "integer"
+
+    UserRankingEntry:
+      type: "object"
+      properties:
+        posicion:
+          type: "integer"
+        userId:
+          type: "string"
+          format: "uuid"
+        nombreUsuario:
+          type: "string"
+        puntosAcumulados:
+          type: "integer"
+        totalSellos:
+          type: "integer"
+        totalVotos:
+          type: "integer"
+        badgesCount:
+          type: "integer"
+
+    ErrorResponse:
+      type: "object"
+      required: ["code", "message"]
+      properties:
+        code:
+          type: "string"
+        message:
+          type: "string"
+        details:
+          type: "object"
+        timestamp:
+          type: "string"
+          format: "date-time"
+
+  responses:
+    BadRequest:
+      description: "Solicitud malformada"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: "No autenticado — JWT requerido"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: "Recurso no encontrado"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
