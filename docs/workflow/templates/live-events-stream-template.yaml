@@ -1,4 +1,4 @@
-﻿asyncapi: "3.0.0"
+asyncapi: "3.0.0"
 info:
   title: "Pulso Loja — Live Events Stream"
   description: |
@@ -185,14 +185,8 @@ components:
   parameters:
     VenueId:
       description: "UUID del escenario"
-      schema:
-        type: "string"
-        format: "uuid"
     EventId:
       description: "UUID del evento"
-      schema:
-        type: "string"
-        format: "uuid"
 
   messages:
     EventUpdateMessage:
