@@ -1,4 +1,3 @@
-# language: es
 # encoding: UTF-8
 # Spec 4 — Feature: Votación en Vivo (Aplausómetro Digital)
 # Owner: Mateo — Equipo Pulso Loja

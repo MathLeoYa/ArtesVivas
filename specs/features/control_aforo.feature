@@ -1,4 +1,3 @@
-# language: es
 # encoding: UTF-8
 # Spec 4 — Feature: Control de Aforo en Tiempo Real
 # Owner: Mateo — Equipo Pulso Loja

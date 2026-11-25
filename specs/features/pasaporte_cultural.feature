@@ -1,4 +1,3 @@
-# language: es
 # encoding: UTF-8
 # Spec 4 — Feature: Pasaporte Cultural Digital y Badges
 # Owner: Mateo — Equipo Pulso Loja
