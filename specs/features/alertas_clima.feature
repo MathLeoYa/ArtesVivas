@@ -1,4 +1,3 @@
-# language: es
 # encoding: UTF-8
 # Spec 4 — Feature: Alertas Meteorológicas y Reubicación de Escenarios
 # Owner: Mateo — Equipo Pulso Loja

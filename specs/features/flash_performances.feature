@@ -1,4 +1,3 @@
-# language: es
 # encoding: UTF-8
 # Spec 4 — Feature: Registro de Flash Performances Callejeras
 # Owner: Mateo — Equipo Pulso Loja
