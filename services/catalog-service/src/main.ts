@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import { randomUUID } from 'crypto';
 
 const app = express();
 app.use(cors());
@@ -86,6 +87,13 @@ const events = [
   }
 ];
 
+const votesByEvent: Record<string, { totalVotos: number; suma: number }> = {
+  '550e8400-e29b-41d4-a716-446655440000': { totalVotos: 42, suma: 198 },
+  '880e8400-e29b-41d4-a716-446655440003': { totalVotos: 28, suma: 134 }
+};
+
+const stampedVenues: string[] = [];
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'catalog-service', timestamp: new Date().toISOString() });
 });
@@ -111,6 +119,34 @@ app.get('/api/v1/events/:id', (req, res) => {
     return res.status(404).json({ code: 'EVENT_NOT_FOUND', message: 'Evento no encontrado' });
   }
   return res.json(found);
+});
+
+app.post('/api/v1/events/flash', (req, res) => {
+  const { nombre, duracionEstimadaMinutos, lat, lng } = req.body ?? {};
+  if (!nombre || typeof nombre !== 'string' || nombre.trim().length < 3) {
+    return res.status(400).json({ code: 'INVALID_REQUEST', message: 'Nombre requerido (mín. 3 caracteres)' });
+  }
+  const duracion = Number(duracionEstimadaMinutos) || 25;
+  const created = {
+    id: randomUUID(),
+    titulo: nombre.trim(),
+    categoria: 'flash',
+    estado: 'en_vivo',
+    fecha: new Date().toISOString().slice(0, 10),
+    horaInicio: new Date().toTimeString().slice(0, 5),
+    duracionMinutos: Math.min(120, Math.max(5, duracion)),
+    escenario: { id: venues[2].id, nombre: 'Acto Callejero — Centro Histórico' },
+    coordenadas: {
+      lat: typeof lat === 'number' ? lat : -3.9982 + (Math.random() - 0.5) * 0.002,
+      lng: typeof lng === 'number' ? lng : -79.197 + (Math.random() - 0.5) * 0.002
+    },
+    aforoActual: 12,
+    aforoMaximo: 150,
+    esFlash: true
+  };
+  events.unshift(created);
+  votesByEvent[created.id] = { totalVotos: 0, suma: 0 };
+  return res.status(201).json(created);
 });
 
 app.get('/api/v1/venues', (_req, res) => {
@@ -155,6 +191,70 @@ app.get('/api/v1/map/points', (_req, res) => {
         nivelAforo: 'verde'
       }
     }))
+  });
+});
+
+app.get('/api/v1/votes/live', (_req, res) => {
+  const list = Object.entries(votesByEvent).map(([eventoId, stats]) => ({
+    eventoId,
+    totalVotos: stats.totalVotos,
+    promedio: stats.totalVotos > 0 ? Number((stats.suma / stats.totalVotos).toFixed(2)) : 0
+  }));
+  res.json(list);
+});
+
+app.post('/api/v1/votes', (req, res) => {
+  const { eventoId, calificacion } = req.body ?? {};
+  const score = Number(calificacion);
+  if (!eventoId || Number.isNaN(score) || score < 1 || score > 5) {
+    return res.status(400).json({ code: 'INVALID_VOTE', message: 'eventoId y calificacion (1-5) son obligatorios' });
+  }
+  const ev = events.find((e) => e.id === eventoId);
+  if (!ev || ev.estado !== 'en_vivo') {
+    return res.status(422).json({ code: 'EVENT_NOT_LIVE', message: 'Solo puedes votar por eventos en vivo' });
+  }
+  const entry = votesByEvent[eventoId] ?? { totalVotos: 0, suma: 0 };
+  entry.totalVotos += 1;
+  entry.suma += score;
+  votesByEvent[eventoId] = entry;
+
+  return res.status(201).json({
+    eventoId,
+    totalVotos: entry.totalVotos,
+    promedio: Number((entry.suma / entry.totalVotos).toFixed(2))
+  });
+});
+
+app.get('/api/v1/passport', (_req, res) => {
+  res.json({
+    sellos: stampedVenues,
+    puntosAcumulados: stampedVenues.length * 50,
+    badges:
+      stampedVenues.length >= 3
+        ? [{ id: 'badge-001', nombre: 'Explorador Andino', descripcion: 'Visitaste los 3 escenarios del festival' }]
+        : []
+  });
+});
+
+app.post('/api/v1/passport/stamp', (req, res) => {
+  const { escenarioId } = req.body ?? {};
+  if (!escenarioId || !venues.some((v) => v.id === escenarioId)) {
+    return res.status(404).json({ code: 'VENUE_NOT_FOUND', message: 'Escenario no encontrado' });
+  }
+  if (stampedVenues.includes(escenarioId)) {
+    return res.status(409).json({
+      code: 'STAMP_ALREADY_EXISTS',
+      message: 'Ya tienes el sello de este escenario en tu pasaporte'
+    });
+  }
+  stampedVenues.push(escenarioId);
+  return res.status(201).json({
+    sellos: stampedVenues,
+    puntosAcumulados: stampedVenues.length * 50,
+    badgeDesbloqueado:
+      stampedVenues.length >= 3
+        ? { id: 'badge-001', nombre: 'Explorador Andino', descripcion: 'Visitaste los 3 escenarios del festival' }
+        : null
   });
 });
 

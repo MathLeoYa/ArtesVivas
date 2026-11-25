@@ -1,5 +1,19 @@
 import { useEffect, useState } from 'react';
-import { Calendar, MapPin, Radio, Sparkles, Users, Activity } from 'lucide-react';
+import {
+  Activity,
+  Award,
+  Calendar,
+  CloudRain,
+  Flame,
+  Map as MapIcon,
+  MapPin,
+  Radio,
+  Sparkles,
+  Star,
+  Users,
+  Zap
+} from 'lucide-react';
+import LojaMap, { MapFeature } from './LojaMap';
 
 interface EventItem {
   id: string;
@@ -13,6 +27,7 @@ interface EventItem {
   coordenadas: { lat: number; lng: number };
   aforoActual?: number;
   aforoMaximo?: number;
+  esFlash?: boolean;
 }
 
 interface VenueItem {
@@ -23,6 +38,12 @@ interface VenueItem {
   esCubierto?: boolean;
   descripcion?: string;
   aforoActual?: number;
+}
+
+interface VoteStat {
+  eventoId: string;
+  totalVotos: number;
+  promedio: number;
 }
 
 const FALLBACK_EVENTS: EventItem[] = [
@@ -63,7 +84,8 @@ const FALLBACK_EVENTS: EventItem[] = [
     escenario: { id: '11111111-1111-4111-8111-111111111103', nombre: 'Calle Lourdes' },
     coordenadas: { lat: -3.9995, lng: -79.196 },
     aforoActual: 145,
-    aforoMaximo: 150
+    aforoMaximo: 150,
+    esFlash: true
   }
 ];
 
@@ -100,29 +122,175 @@ const FALLBACK_VENUES: VenueItem[] = [
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export default function App() {
-  const [tab, setTab] = useState<'events' | 'venues' | 'arch'>('events');
+  const [tab, setTab] = useState<'events' | 'map' | 'venues' | 'gamification' | 'arch'>('events');
   const [events, setEvents] = useState<EventItem[]>(FALLBACK_EVENTS);
   const [venues, setVenues] = useState<VenueItem[]>(FALLBACK_VENUES);
+  const [mapFeatures, setMapFeatures] = useState<MapFeature[]>([]);
+  const [votes, setVotes] = useState<Record<string, VoteStat>>({
+    '550e8400-e29b-41d4-a716-446655440000': {
+      eventoId: '550e8400-e29b-41d4-a716-446655440000',
+      totalVotos: 42,
+      promedio: 4.71
+    },
+    '880e8400-e29b-41d4-a716-446655440003': {
+      eventoId: '880e8400-e29b-41d4-a716-446655440003',
+      totalVotos: 28,
+      promedio: 4.79
+    }
+  });
+  const [stampedVenues, setStampedVenues] = useState<string[]>([]);
   const [category, setCategory] = useState<string>('todas');
   const [backendConnected, setBackendConnected] = useState(false);
+  const [flashName, setFlashName] = useState('');
+  const [weatherAlert, setWeatherAlert] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
-  useEffect(() => {
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3500);
+  };
+
+  const syncFromBackend = () => {
     if (!API_URL) return;
     Promise.all([
       fetch(`${API_URL}/api/v1/events`).then((r) => (r.ok ? r.json() : null)),
-      fetch(`${API_URL}/api/v1/venues`).then((r) => (r.ok ? r.json() : null))
+      fetch(`${API_URL}/api/v1/venues`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${API_URL}/api/v1/map/points`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${API_URL}/api/v1/votes/live`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${API_URL}/api/v1/passport`).then((r) => (r.ok ? r.json() : null))
     ])
-      .then(([evRes, vnRes]) => {
+      .then(([evRes, vnRes, mapRes, votesRes, passRes]) => {
         if (evRes?.data) {
           setEvents(evRes.data);
           setBackendConnected(true);
         }
-        if (Array.isArray(vnRes)) {
-          setVenues(vnRes);
+        if (Array.isArray(vnRes)) setVenues(vnRes);
+        if (mapRes?.features) setMapFeatures(mapRes.features);
+        if (Array.isArray(votesRes)) {
+          const next: Record<string, VoteStat> = {};
+          votesRes.forEach((v: VoteStat) => {
+            next[v.eventoId] = v;
+          });
+          setVotes(next);
         }
+        if (passRes?.sellos) setStampedVenues(passRes.sellos);
       })
       .catch(() => setBackendConnected(false));
+  };
+
+  useEffect(() => {
+    syncFromBackend();
   }, []);
+
+  useEffect(() => {
+    if (!backendConnected) {
+      setMapFeatures(
+        events.map((ev) => ({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [ev.coordenadas.lng, ev.coordenadas.lat] },
+          properties: {
+            id: ev.id,
+            tipo: ev.esFlash ? 'flash' : 'evento',
+            titulo: ev.titulo,
+            estado: ev.estado,
+            nivelAforo: 'verde'
+          }
+        }))
+      );
+    }
+  }, [events, backendConnected]);
+
+  const handleCastVote = async (eventoId: string, calificacion: number) => {
+    if (backendConnected && API_URL) {
+      const res = await fetch(`${API_URL}/api/v1/votes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventoId, calificacion })
+      });
+      if (res.ok) {
+        const updated: VoteStat = await res.json();
+        setVotes((prev) => ({ ...prev, [eventoId]: updated }));
+        showToast(`¡Voto de ${calificacion}★ registrado! Promedio en vivo: ${updated.promedio}`);
+        return;
+      }
+    }
+    setVotes((prev) => {
+      const cur = prev[eventoId] ?? { eventoId, totalVotos: 0, promedio: 0 };
+      const totalVotos = cur.totalVotos + 1;
+      const promedio = Number(((cur.promedio * cur.totalVotos + calificacion) / totalVotos).toFixed(2));
+      return { ...prev, [eventoId]: { eventoId, totalVotos, promedio } };
+    });
+    showToast(`¡Voto de ${calificacion}★ registrado en el Aplausómetro!`);
+  };
+
+  const handleStamp = async (escenarioId: string, nombre: string) => {
+    if (stampedVenues.includes(escenarioId)) {
+      showToast(`Ya tienes el sello de ${nombre} (409 STAMP_ALREADY_EXISTS)`);
+      return;
+    }
+    if (backendConnected && API_URL) {
+      const res = await fetch(`${API_URL}/api/v1/passport/stamp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ escenarioId })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setStampedVenues(data.sellos);
+        showToast(
+          data.badgeDesbloqueado
+            ? `🏅 ¡Badge desbloqueado: ${data.badgeDesbloqueado.nombre}!`
+            : `✅ Sello de ${nombre} agregado (+50 pts)`
+        );
+        return;
+      }
+    }
+    const next = [...stampedVenues, escenarioId];
+    setStampedVenues(next);
+    showToast(
+      next.length >= 3
+        ? '🏅 ¡Badge desbloqueado: Explorador Andino!'
+        : `✅ Sello de ${nombre} agregado (+50 pts)`
+    );
+  };
+
+  const handleCreateFlash = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (flashName.trim().length < 3) return;
+    if (backendConnected && API_URL) {
+      const res = await fetch(`${API_URL}/api/v1/events/flash`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre: flashName, duracionEstimadaMinutos: 25 })
+      });
+      if (res.ok) {
+        setFlashName('');
+        syncFromBackend();
+        showToast('⚡ Flash Performance publicada y visible en el Mapa de Loja');
+        return;
+      }
+    }
+    const created: EventItem = {
+      id: crypto.randomUUID(),
+      titulo: flashName.trim(),
+      categoria: 'flash',
+      estado: 'en_vivo',
+      fecha: new Date().toISOString().slice(0, 10),
+      horaInicio: new Date().toTimeString().slice(0, 5),
+      duracionMinutos: 25,
+      escenario: { id: '11111111-1111-4111-8111-111111111103', nombre: 'Centro Histórico de Loja' },
+      coordenadas: {
+        lat: -3.9982 + (Math.random() - 0.5) * 0.002,
+        lng: -79.197 + (Math.random() - 0.5) * 0.002
+      },
+      aforoActual: 15,
+      aforoMaximo: 150,
+      esFlash: true
+    };
+    setEvents((prev) => [created, ...prev]);
+    setFlashName('');
+    showToast('⚡ Flash Performance publicada');
+  };
 
   const categories = ['todas', 'danza', 'teatro', 'musica', 'flash'];
   const filteredEvents =
@@ -137,6 +305,8 @@ export default function App() {
 
   return (
     <div className="container">
+      {toast && <div className="toast">{toast}</div>}
+
       <header className="header">
         <div>
           <span className="badge">
@@ -147,18 +317,44 @@ export default function App() {
             Arquitectura Orientada a Eventos (EDA) + Specification-Driven Development (SDD)
           </p>
         </div>
-        <span className={`badge ${backendConnected ? 'live' : ''}`}>
-          <Activity size={14} />
-          {backendConnected ? `API conectada (${API_URL})` : 'Modo Contrato SDD (Mock Local)'}
-        </span>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button className="chip" onClick={() => setWeatherAlert((v) => !v)}>
+            <CloudRain size={14} style={{ verticalAlign: 'middle', marginRight: 5 }} />
+            {weatherAlert ? 'Desactivar Alerta Clima' : 'Simular Alerta Lluvia'}
+          </button>
+          <span className={`badge ${backendConnected ? 'live' : ''}`}>
+            <Activity size={14} />
+            {backendConnected ? `API conectada (${API_URL})` : 'Modo Contrato SDD (Mock Local)'}
+          </span>
+        </div>
       </header>
+
+      {weatherAlert && (
+        <div className="alert-banner">
+          <CloudRain size={18} />
+          <div>
+            <strong>WeatherAlert (Spec 3 — AsyncAPI):</strong> Lluvia moderada detectada en el centro
+            de Loja. Los eventos al aire libre se reubican hacia{' '}
+            <strong>Teatro Benjamín Carrión</strong> (cubierto, aforo disponible).
+          </div>
+        </div>
+      )}
 
       <nav className="tabs">
         <button className={`tab ${tab === 'events' ? 'active' : ''}`} onClick={() => setTab('events')}>
           <Calendar size={16} /> Cartelera de Eventos
         </button>
+        <button className={`tab ${tab === 'map' ? 'active' : ''}`} onClick={() => setTab('map')}>
+          <MapIcon size={16} /> Mapa de Loja
+        </button>
         <button className={`tab ${tab === 'venues' ? 'active' : ''}`} onClick={() => setTab('venues')}>
           <MapPin size={16} /> Escenarios & Aforo
+        </button>
+        <button
+          className={`tab ${tab === 'gamification' ? 'active' : ''}`}
+          onClick={() => setTab('gamification')}
+        >
+          <Flame size={16} /> Aplausómetro & Pasaporte
         </button>
         <button className={`tab ${tab === 'arch' ? 'active' : ''}`} onClick={() => setTab('arch')}>
           <Radio size={16} /> Specs & Servicios (EDA)
@@ -167,6 +363,19 @@ export default function App() {
 
       {tab === 'events' && (
         <>
+          <form className="flash-form" onSubmit={handleCreateFlash}>
+            <Zap size={16} color="var(--accent)" />
+            <input
+              type="text"
+              placeholder="Anunciar Flash Performance callejera en Loja..."
+              value={flashName}
+              onChange={(e) => setFlashName(e.target.value)}
+            />
+            <button type="submit" className="btn-primary">
+              Publicar Flash
+            </button>
+          </form>
+
           <div className="filters">
             {categories.map((cat) => (
               <button
@@ -220,10 +429,23 @@ export default function App() {
         </>
       )}
 
+      {tab === 'map' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="card" style={{ padding: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <strong>Mapa Interactivo — Centro Histórico de Loja (GeoJSON /api/v1/map/points)</strong>
+              <span className="meta">🟢 Evento oficial &nbsp;·&nbsp; 🟠 Flash Performance</span>
+            </div>
+          </div>
+          <LojaMap features={mapFeatures} />
+        </div>
+      )}
+
       {tab === 'venues' && (
         <div className="grid">
           {venues.map((v) => {
             const cap = getCapacityLevel(v.aforoActual ?? 0, v.capacidadMaxima);
+            const stamped = stampedVenues.includes(v.id);
             return (
               <article key={v.id} className="card">
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -248,9 +470,93 @@ export default function App() {
                     />
                   </div>
                 </div>
+                <button
+                  className={stamped ? 'chip selected' : 'btn-primary'}
+                  style={{ marginTop: 8 }}
+                  onClick={() => handleStamp(v.id, v.nombre)}
+                >
+                  {stamped ? '✓ Escenario Sellado (+50 pts)' : 'Sellar en Pasaporte (100m)'}
+                </button>
               </article>
             );
           })}
+        </div>
+      )}
+
+      {tab === 'gamification' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <span className="badge">
+                  <Award size={14} /> Spec 2 — Pasaporte Cultural Digital
+                </span>
+                <h2 className="card-title" style={{ marginTop: 8 }}>
+                  Puntos acumulados: {stampedVenues.length * 50} pts ({stampedVenues.length}/3 sellos)
+                </h2>
+                <p className="meta">
+                  Visita los escenarios del festival para sellar tu pasaporte y desbloquear insignias.
+                </p>
+              </div>
+              {stampedVenues.length >= 3 ? (
+                <span className="badge live" style={{ alignSelf: 'center', fontSize: 14, padding: '8px 14px' }}>
+                  🏅 Badge Desbloqueado: Explorador Andino
+                </span>
+              ) : (
+                <span className="badge" style={{ alignSelf: 'center' }}>
+                  Te faltan {3 - stampedVenues.length} sellos para Explorador Andino
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+              {venues.map((v) => {
+                const stamped = stampedVenues.includes(v.id);
+                return (
+                  <button
+                    key={v.id}
+                    className={stamped ? 'chip selected' : 'chip'}
+                    onClick={() => handleStamp(v.id, v.nombre)}
+                  >
+                    {stamped ? `✓ ${v.nombre}` : `+ Sellar ${v.nombre}`}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <h2 style={{ fontSize: 20, marginBottom: 12 }}>
+              <Flame size={18} style={{ verticalAlign: 'middle', color: 'var(--accent)', marginRight: 6 }} />
+              Aplausómetro en Vivo (Eventos en curso)
+            </h2>
+            <div className="grid">
+              {events
+                .filter((e) => e.estado === 'en_vivo')
+                .map((ev) => {
+                  const st = votes[ev.id] ?? { totalVotos: 0, promedio: 0 };
+                  return (
+                    <article key={ev.id} className="card">
+                      <span className="badge live">en vivo</span>
+                      <h3 className="card-title">{ev.titulo}</h3>
+                      <div className="meta">
+                        <Star size={14} color="var(--accent)" /> Promedio: <strong>{st.promedio}</strong> ({st.totalVotos} votos)
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                        {[1, 2, 3, 4, 5].map((n) => (
+                          <button
+                            key={n}
+                            className="chip"
+                            onClick={() => handleCastVote(ev.id, n)}
+                          >
+                            {n}★
+                          </button>
+                        ))}
+                      </div>
+                    </article>
+                  );
+                })}
+            </div>
+          </div>
         </div>
       )}
 
