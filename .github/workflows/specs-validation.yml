@@ -79,15 +79,26 @@ jobs:
           node-version: "20"
 
       - name: Install Gherkin parser
-        run: npm install -g @cucumber/gherkin
+        run: npm install --no-save @cucumber/gherkin @cucumber/messages
 
       - name: Validate Gherkin files
         run: |
-          for feature in specs/features/*.feature; do
-            echo "Validating $feature..."
-            npx gherkin-parser "$feature" || exit 1
-          done
-          echo "✅ Todos los archivos Gherkin son sintácticamente válidos"
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const { Parser, AstBuilder, GherkinClassicTokenMatcher } = require("@cucumber/gherkin");
+            const { IdGenerator } = require("@cucumber/messages");
+            const files = fs.readdirSync("specs/features").filter(f => f.endsWith(".feature"));
+            for (const file of files) {
+              const fullPath = path.join("specs/features", file);
+              console.log("Validating " + fullPath + "...");
+              const content = fs.readFileSync(fullPath, "utf8");
+              const parser = new Parser(new AstBuilder(IdGenerator.uuid()), new GherkinClassicTokenMatcher());
+              const doc = parser.parse(content);
+              if (!doc.feature) throw new Error("No feature found in " + fullPath);
+            }
+            console.log("✅ Todos los archivos Gherkin son sintácticamente válidos (" + files.length + " archivos)");
+          '
 
   check-breaking-changes:
     name: "⚠️ Detectar Cambios Incompatibles (OpenAPI Diff)"

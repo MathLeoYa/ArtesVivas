@@ -126,7 +126,7 @@ paths:
                     horaInicio: "19:00"
                     duracionMinutos: 60
                     escenario:
-                      id: "venue-001"
+                      id: "11111111-1111-4111-8111-111111111101"
                       nombre: "Plaza San Sebastián"
                     coordenadas:
                       lat: -3.9985
@@ -146,6 +146,10 @@ paths:
       operationId: "createEvent"
       tags: ["events"]
       summary: "Crear nuevo evento (admin/curador)"
+      description: |
+        Registra un nuevo evento oficial en la programación del FIAVL.
+        Requiere autenticación JWT con rol `admin` o `curador`.
+        Al crearse, publica el evento de dominio `EventCreated` en Redis Pub/Sub.
       security:
         - BearerAuth: []
       requestBody:
@@ -161,6 +165,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Event"
+              example:
+                id: "770e8400-e29b-41d4-a716-446655440002"
+                titulo: "Percusión Amazónica — Colectivo Kichwa"
+                categoria: "musica"
+                estado: "programado"
+                fecha: "2026-10-16"
+                horaInicio: "20:00"
+                duracionMinutos: 90
+                escenario:
+                  id: "11111111-1111-4111-8111-111111111101"
+                  nombre: "Plaza San Sebastián"
+                coordenadas:
+                  lat: -3.9985
+                  lng: -79.1972
+                aforoActual: 0
+                aforoMaximo: 500
+                descripcion: "Acto de percusión tradicional amazónica en el marco del FIAVL."
+                artistas:
+                  - id: "22222222-2222-4222-8222-222222222202"
+                    nombre: "Colectivo Kichwa"
+                    pais: "Ecuador"
+                esFlash: false
+                createdAt: "2026-09-10T12:00:00Z"
+                updatedAt: "2026-09-10T12:00:00Z"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -175,6 +203,9 @@ paths:
       operationId: "getEventById"
       tags: ["events"]
       summary: "Obtener detalle completo de un evento"
+      description: |
+        Retorna la ficha completa de un evento incluyendo descripción, artistas,
+        escenario asignado, coordenadas geográficas y aforo en tiempo real.
       parameters:
         - $ref: "#/components/parameters/EventId"
       responses:
@@ -193,7 +224,7 @@ paths:
                 horaInicio: "19:00"
                 duracionMinutos: 60
                 escenario:
-                  id: "venue-001"
+                  id: "11111111-1111-4111-8111-111111111101"
                   nombre: "Plaza San Sebastián"
                 coordenadas:
                   lat: -3.9985
@@ -202,7 +233,7 @@ paths:
                 aforoMaximo: 500
                 descripcion: "Danza ritual de la nacionalidad Saraguro presentada en el marco del FIAVL."
                 artistas:
-                  - id: "artist-001"
+                  - id: "22222222-2222-4222-8222-222222222201"
                     nombre: "Colectivo Saraguro Kawsay"
                     pais: "Ecuador"
                 esFlash: false
@@ -235,6 +266,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Event"
+              example:
+                id: "550e8400-e29b-41d4-a716-446655440000"
+                titulo: "Danza de los Saraguros"
+                categoria: "danza"
+                estado: "reubicando"
+                fecha: "2026-10-15"
+                horaInicio: "19:30"
+                duracionMinutos: 60
+                escenario:
+                  id: "11111111-1111-4111-8111-111111111102"
+                  nombre: "Teatro Benjamín Carrión"
+                coordenadas:
+                  lat: -3.9970
+                  lng: -79.1980
+                aforoActual: 120
+                aforoMaximo: 300
+                esFlash: false
+                updatedAt: "2026-10-15T18:45:00Z"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -301,6 +350,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Event"
+              example:
+                id: "880e8400-e29b-41d4-a716-446655440003"
+                titulo: "Máscaras Rituales — Improvisación"
+                categoria: "flash"
+                estado: "en_vivo"
+                fecha: "2026-10-15"
+                horaInicio: "18:15"
+                duracionMinutos: 20
+                coordenadas:
+                  lat: -3.9980
+                  lng: -79.1965
+                aforoActual: 0
+                aforoMaximo: 150
+                esFlash: true
+                createdAt: "2026-10-15T18:15:00Z"
+                updatedAt: "2026-10-15T18:15:00Z"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -325,6 +390,9 @@ paths:
       operationId: "listVenues"
       tags: ["venues"]
       summary: "Listar escenarios y sedes del festival"
+      description: |
+        Retorna el catálogo completo de escenarios oficiales, plazas y calles
+        peatonales habilitadas para el FIAVL, indicando si son cubiertos y su capacidad máxima.
       responses:
         "200":
           description: "Lista de escenarios"
@@ -335,7 +403,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/Venue"
               example:
-                - id: "venue-001"
+                - id: "11111111-1111-4111-8111-111111111101"
                   nombre: "Plaza San Sebastián"
                   tipo: "plaza"
                   coordenadas:
@@ -344,7 +412,7 @@ paths:
                   capacidadMaxima: 500
                   esCubierto: false
                   descripcion: "Plaza principal del centro histórico de Loja"
-                - id: "venue-002"
+                - id: "11111111-1111-4111-8111-111111111102"
                   nombre: "Teatro Benjamín Carrión"
                   tipo: "teatro"
                   coordenadas:
@@ -353,7 +421,7 @@ paths:
                   capacidadMaxima: 300
                   esCubierto: true
                   descripcion: "Teatro principal del festival con aforo cubierto"
-                - id: "venue-003"
+                - id: "11111111-1111-4111-8111-111111111103"
                   nombre: "Calle Lourdes"
                   tipo: "calle"
                   coordenadas:
@@ -368,6 +436,9 @@ paths:
       operationId: "getVenueById"
       tags: ["venues"]
       summary: "Detalle de un escenario con aforo actual"
+      description: |
+        Retorna la información detallada de un escenario junto con su ocupación
+        en tiempo real (obtenida desde Redis / telemetry-service) y la programación del día.
       parameters:
         - name: "id"
           in: "path"
@@ -382,6 +453,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VenueDetail"
+              example:
+                id: "11111111-1111-4111-8111-111111111101"
+                nombre: "Plaza San Sebastián"
+                tipo: "plaza"
+                coordenadas:
+                  lat: -3.9985
+                  lng: -79.1972
+                capacidadMaxima: 500
+                esCubierto: false
+                descripcion: "Plaza principal del centro histórico de Loja"
+                aforoActual: 234
+                nivelAforo: "verde"
+                eventosHoy: []
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -390,6 +474,9 @@ paths:
       operationId: "getDailySchedule"
       tags: ["schedule"]
       summary: "Programación completa del festival"
+      description: |
+        Retorna la agenda horaria del festival agrupada por día y ordenada
+        cronológicamente. Permite filtrar por una fecha específica.
       parameters:
         - name: "fecha"
           in: "query"
@@ -421,7 +508,7 @@ paths:
                         horaInicio: "18:00"
                         duracionMinutos: 60
                         escenario:
-                          id: "venue-001"
+                          id: "11111111-1111-4111-8111-111111111101"
                           nombre: "Plaza San Sebastián"
                         coordenadas:
                           lat: -3.9985
@@ -439,7 +526,7 @@ paths:
                         horaInicio: "20:00"
                         duracionMinutos: 90
                         escenario:
-                          id: "venue-002"
+                          id: "11111111-1111-4111-8111-111111111102"
                           nombre: "Teatro Benjamín Carrión"
                         coordenadas:
                           lat: -3.9970
@@ -475,6 +562,19 @@ paths:
             application/geo+json:
               schema:
                 $ref: "#/components/schemas/GeoJSONFeatureCollection"
+              example:
+                type: "FeatureCollection"
+                features:
+                  - type: "Feature"
+                    geometry:
+                      type: "Point"
+                      coordinates: [-79.1972, -3.9985]
+                    properties:
+                      id: "550e8400-e29b-41d4-a716-446655440000"
+                      tipo: "evento"
+                      titulo: "Danza de los Saraguros"
+                      estado: "en_vivo"
+                      nivelAforo: "verde"
 
 components:
   securitySchemes:
@@ -696,9 +796,9 @@ components:
         fecha: "2026-10-16"
         horaInicio: "20:00"
         duracionMinutos: 90
-        escenarioId: "venue-001"
+        escenarioId: "11111111-1111-4111-8111-111111111101"
         artistaIds:
-          - "artist-002"
+          - "22222222-2222-4222-8222-222222222202"
       properties:
         titulo:
           type: "string"
